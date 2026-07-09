@@ -286,6 +286,83 @@ against, without editing JSON config. Different races need different stations
 just builds these objects from the ViVa index and POSTs them — no schema
 migration needed.
 
+### Design note — international observation station sources (future)
+
+ViVa (Sjöfartsverket) covers Sweden well. The same observation-source
+pattern can be extended to other countries' maritime weather networks for
+racing in Finland, Norway, Denmark, etc. Each country needs two things:
+a **station index fetcher** (equivalent to `vivaLocations.js`) and a
+**live-data poller** (equivalent to what the signalk-viva plugin does for
+SignalK paths).
+
+The architecture already supports any source via configured `dirPath` /
+`speedPath`. What's missing is automatic discovery — a "pick from a list"
+UX equivalent to the ViVa station picker.
+
+#### Finland — FMI (Ilmatieteen laitos / Finnish Meteorological Institute)
+
+FMI publishes all observation data through a free, keyless WFS (OGC Web
+Feature Service) endpoint: `https://opendata.fmi.fi/wfs`
+
+Key details:
+- **Station list**: `storedquery_id=fmi::ef::stations` returns all
+  Finnish weather stations as GML/XML, including fmisid, name, lat, lon,
+  and activity status. Filter by `networkClass=itmf` or geography for
+  coastal/archipelago stations (Turku, Hanko, Åland, Helsinki seaward).
+- **Observation query**:
+  ```
+  storedquery_id=fmi::observations::weather::simple
+  &fmisid=<id>&parameters=WindSpeedMS,WindDirection,WindGust
+  &starttime=<ISO>&endtime=<ISO>&timestep=10
+  ```
+  Returns 10-minute average wind speed (m/s), direction (°, convert to
+  rad), and gust — same resolution as ViVa.
+- **Key stations for Finnish coastal sailing**: Utö (most exposed, SW
+  archipelago), Hanko, Helsinki Katajaluoto, Turku Aranda, Åland
+  (Mariehamn), Jurmo.
+- **No API key, no CORS restriction on server-side fetch.**
+- Parse: response is simple XML with `<BsWfs:ParameterName>` and
+  `<BsWfs:ParameterValue>` pairs. Straightforward to parse without
+  a heavy XML library.
+
+**Implementation plan:**
+1. `fmiLocations.js` — fetch + cache station index; expose
+   `fetchFmiStations()` → Map of `fmisid -> { name, latitude, longitude }`
+2. `providers/fmiObservations.js` — poll on a configurable interval
+   (default 10 min), fetch latest obs for active FMI stations, append to
+   the observation store under `location = fmi_<fmisid>` (prefixed to
+   avoid slug collision with ViVa).
+3. Station picker `/stations` endpoint gains `source: "fmi"` entries
+   alongside ViVa entries — same dropdown, flag shown in parentheses.
+4. Verification, composite, and scoreboard logic are unchanged — FMI
+   observations land in the same ndjson format.
+
+#### Norway — met.no observations (Frost API)
+
+Norwegian met office observations via `https://frost.met.no/observations/v0.jsonld`
+Requires a **free API key** (register at frost.met.no). Good coastal
+station network (Utsira, Lista, Oksøy, Torungen). Target for a later
+milestone; same pattern as FMI but REST/JSON instead of WFS/XML.
+
+#### Denmark — DMI open data
+
+`https://dmigw.govcloud.dk/v2/metObs/` — requires a free API key from
+DMI. Good coverage of Danish straits and Kattegat — relevant for
+Gothenburg Race, Skagerrak crossings.
+
+#### General adapter contract for observation providers
+
+Each country adapter should implement:
+```js
+{
+  source: "fmi",             // prefix for location labels
+  fetchStations() -> Promise<Map<id, { name, latitude, longitude }>>
+  fetchLatest(stationIds[], since_ms) -> Promise<[{ stationId, t, dir_rad, speed_ms, gust_ms? }]>
+}
+```
+The main plugin calls `fetchLatest()` on the configured interval and
+feeds results into `addObservation()` — no other changes needed.
+
 ### Design note — additional forecast model providers (future)
 
 Open-Meteo is keyless and covers 4–5 models well. Additional providers
