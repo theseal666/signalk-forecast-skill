@@ -1,0 +1,15 @@
+{
+  "name": "signalk-forecast-skill",
+  "version": "0.1.0",
+  "description": "Scores weather forecast models against observed wind — which model fits your waters best",
+  "main": "index.js",
+  "keywords": [
+    "signalk-node-server-plugin"
+  ],
+  "author": "theseal666",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theseal666/signalk-forecast-skill"
+  }
+}

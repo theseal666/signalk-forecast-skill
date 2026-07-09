@@ -11,9 +11,11 @@ actually happens. By race morning you know whether to plan around ECMWF,
 the high-resolution Nordic model, or neither — and whether your trusted
 model habitually reads a few degrees left or right at your racecourse.
 
-**Status: planning.** See [PLAN.md](PLAN.md) for the full design —
-architecture, provider adapters, verification math, storage layout,
-endpoints and milestones.
+**Status: M1 — fetch & archive.** Forecasts from four models (ECMWF, GFS,
+ICON, MET Norway via Open-Meteo) and station observations are being
+collected and archived; verification math and the scoreboard land in M2.
+See [PLAN.md](PLAN.md) for the full design — architecture, provider
+adapters, verification math, storage layout, endpoints and milestones.
 
 Fully independent of (but a good neighbor to)
 [signalk-windshift](https://github.com/theseal666/signalk-windshift) and
