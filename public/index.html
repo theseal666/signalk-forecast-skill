@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forecast Skill</title>
+    <link rel="stylesheet" href="style.css?v=0.2.0">
+</head>
+<body>
+    <div id="dashboard">
+        <header>
+            <div class="control">
+                <label>Location</label>
+                <select id="location-select"></select>
+            </div>
+            <div class="control">
+                <label>Metric</label>
+                <select id="metric-select">
+                    <option value="dirMAE_deg">Direction error (°)</option>
+                    <option value="dirBias_deg">Direction bias (°)</option>
+                    <option value="skill">Skill vs persistence</option>
+                    <option value="speedMAE_ms">Speed error (m/s)</option>
+                    <option value="vectorRMSE_ms">Vector RMSE (m/s)</option>
+                </select>
+            </div>
+            <div class="control legend" id="window-info"></div>
+        </header>
+        <main>
+            <p id="hint"></p>
+            <div id="chart"></div>
+        </main>
+    </div>
+    <script src="app.js?v=0.2.0"></script>
+</body>
+</html>

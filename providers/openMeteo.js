@@ -24,7 +24,8 @@ async function fetchRun(model, position) {
   url.searchParams.set("hourly", "wind_speed_10m,wind_direction_10m");
   url.searchParams.set("wind_speed_unit", "ms");
   url.searchParams.set("timeformat", "unixtime"); // UTC epoch, no timezone games
-  url.searchParams.set("forecast_days", "3");
+  // 8 days out so the 5d and 7d lead-time buckets can be verified
+  url.searchParams.set("forecast_days", "8");
   url.searchParams.set("models", model);
 
   const res = await fetch(url, { signal: AbortSignal.timeout(20000) });

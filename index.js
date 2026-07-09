@@ -1,11 +1,14 @@
 const createStore = require("./store.js");
 const openMeteo = require("./providers/openMeteo.js");
-const { circularMeanFromSums } = require("./verify.js");
+const { circularMeanFromSums, computeScoreboard } = require("./verify.js");
+const { fetchStationIndex } = require("./vivaLocations.js");
 const path = require("path");
 const os = require("os");
 
 const PROVIDERS = [openMeteo];
 const OBS_BUCKET_MS = 10 * 60 * 1000;
+const SCOREBOARD_CACHE_MS = 5 * 60 * 1000;
+const VIVA_DIR_RE = /^environment\.observations\.viva\.([^.]+)\.wind\.directionTrue$/;
 
 module.exports = function (app) {
   const plugin = {};
@@ -22,6 +25,13 @@ module.exports = function (app) {
   let initialFetchTimer = null;
   let flushTimer = null;
   let pruneTimer = null;
+  let stationIndexTimer = null;
+
+  let dirPaths = new Map();
+  let speedPaths = new Map();
+  let knownSlugs = new Set();
+  let stationIndex = null; // slug -> { latitude, longitude, name } from ViVa
+  let scoreboardCache = null;
 
   // per-location observation aggregation into 10-minute circular means
   let buckets = new Map(); // label -> { start, sumSin, sumCos, nDir, sumSpeed, nSpeed }
@@ -85,6 +95,25 @@ module.exports = function (app) {
     }
   }
 
+  function addLocation(loc) {
+    cfg.locations.push(loc);
+    dirPaths.set(loc.dirPath, loc.label);
+    if (loc.speedPath) speedPaths.set(loc.speedPath, loc.label);
+    app.debug(
+      `auto-discovered location '${loc.label}' at ${loc.latitude.toFixed(3)}, ${loc.longitude.toFixed(3)}`
+    );
+    updateStatus();
+  }
+
+  async function refreshStationIndex() {
+    try {
+      stationIndex = await fetchStationIndex();
+      app.debug(`ViVa station index loaded: ${stationIndex.size} slugs`);
+    } catch (e) {
+      app.debug("ViVa station index fetch failed: " + e.message);
+    }
+  }
+
   async function fetchAll() {
     counters.lastFetchAt = Date.now();
     for (const provider of PROVIDERS) {
@@ -93,7 +122,7 @@ module.exports = function (app) {
           app.debug(`unknown model '${model}' for provider ${provider.name} — skipped`);
           continue;
         }
-        for (const loc of cfg.locations) {
+        for (const loc of [...cfg.locations]) {
           try {
             const run = await provider.fetchRun(model, loc);
             run.location = loc.label;
@@ -131,6 +160,7 @@ module.exports = function (app) {
         options.models && options.models.length
           ? options.models
           : openMeteo.defaultModels,
+      autoDiscoverViva: options.autoDiscoverViva !== false,
       fetchIntervalHours: options.fetchIntervalHours || 3,
       retentionDays: options.retentionDays || 14,
       verifyWindowDays: options.verifyWindowDays || 7,
@@ -140,21 +170,47 @@ module.exports = function (app) {
     store = createStore(dataDir(), app.error);
     store.prune(cfg.retentionDays);
 
-    if (cfg.locations.length === 0) {
-      app.setPluginStatus("No locations configured — add at least one in plugin settings");
-      return;
-    }
-
-    const dirPaths = new Map();
-    const speedPaths = new Map();
+    dirPaths = new Map();
+    speedPaths = new Map();
+    knownSlugs = new Set();
     for (const loc of cfg.locations) {
       dirPaths.set(loc.dirPath, loc.label);
       if (loc.speedPath) speedPaths.set(loc.speedPath, loc.label);
+      knownSlugs.add(loc.label);
+    }
+
+    if (cfg.autoDiscoverViva) {
+      refreshStationIndex();
+      stationIndexTimer = setInterval(refreshStationIndex, 24 * 3600 * 1000);
+    } else if (cfg.locations.length === 0) {
+      app.setPluginStatus("No locations configured and auto-discovery is off");
+      return;
     }
 
     unsubscribes.push(
       app.streambundle.getSelfBus().forEach((pathValue) => {
         if (typeof pathValue.value !== "number" || isNaN(pathValue.value)) return;
+
+        // Locations appear by themselves: any ViVa station the viva plugin
+        // starts publishing gets coordinates from the station index
+        if (cfg.autoDiscoverViva && stationIndex) {
+          const m = VIVA_DIR_RE.exec(pathValue.path);
+          if (m && !knownSlugs.has(m[1])) {
+            const slug = m[1];
+            knownSlugs.add(slug); // only look each slug up once
+            const st = stationIndex.get(slug);
+            if (st) {
+              addLocation({
+                label: slug,
+                latitude: st.latitude,
+                longitude: st.longitude,
+                dirPath: `environment.observations.viva.${slug}.wind.directionTrue`,
+                speedPath: `environment.observations.viva.${slug}.wind.averageSpeed`,
+              });
+            }
+          }
+        }
+
         const dirLoc = dirPaths.get(pathValue.path);
         if (dirLoc) addObservation(dirLoc, "dir", pathValue.value);
         const speedLoc = speedPaths.get(pathValue.path);
@@ -169,10 +225,10 @@ module.exports = function (app) {
 
     pruneTimer = setInterval(() => store.prune(cfg.retentionDays), 24 * 3600 * 1000);
 
-    // First fetch shortly after startup (let the server settle), then on
-    // the configured interval — models only issue new runs a few times a
-    // day, so there is no point in fetching more often
-    initialFetchTimer = setTimeout(fetchAll, 30 * 1000);
+    // First fetch shortly after startup (let the server and auto-discovery
+    // settle), then on the configured interval — models only issue new runs
+    // a few times a day
+    initialFetchTimer = setTimeout(fetchAll, 60 * 1000);
     fetchTimer = setInterval(fetchAll, cfg.fetchIntervalHours * 3600 * 1000);
 
     updateStatus();
@@ -186,6 +242,7 @@ module.exports = function (app) {
           ? {
               locations: cfg.locations.map((l) => l.label),
               models: cfg.models,
+              autoDiscoverViva: cfg.autoDiscoverViva,
               fetchIntervalHours: cfg.fetchIntervalHours,
             }
           : null,
@@ -194,31 +251,70 @@ module.exports = function (app) {
       });
     });
 
-    // M2 will serve real numbers here
+    // The verification result: models × locations × lead-time buckets
     router.get("/scoreboard", (req, res) => {
-      res.status(501).json({ error: "verification lands in M2 — archive is accumulating" });
+      if (!store || !cfg) return res.status(503).json({ error: "plugin not started" });
+      const now = Date.now();
+      if (scoreboardCache && now - scoreboardCache.generatedAt < SCOREBOARD_CACHE_MS) {
+        return res.json(scoreboardCache);
+      }
+      // forecasts issued up to 8 days before the window can still have
+      // valid hours inside it
+      const forecasts = store.readSince(
+        "forecasts",
+        now - (cfg.verifyWindowDays + 8) * 86400000
+      );
+      const observations = store.readSince(
+        "observations",
+        now - cfg.verifyWindowDays * 86400000 - 3600000
+      );
+      const sb = computeScoreboard({
+        forecasts,
+        observations,
+        now,
+        windowDays: cfg.verifyWindowDays,
+      });
+      // attach coordinates for the webapp
+      const byLabel = new Map(cfg.locations.map((l) => [l.label, l]));
+      for (const loc of sb.locations) {
+        const known = byLabel.get(loc.label);
+        if (known) {
+          loc.latitude = known.latitude;
+          loc.longitude = known.longitude;
+        }
+      }
+      sb.modelLabels = openMeteo.modelLabels;
+      scoreboardCache = sb;
+      res.json(sb);
     });
   };
 
   plugin.stop = function () {
-    for (const timer of [fetchTimer, flushTimer, pruneTimer]) {
+    for (const timer of [fetchTimer, flushTimer, pruneTimer, stationIndexTimer]) {
       if (timer) clearInterval(timer);
     }
     if (initialFetchTimer) clearTimeout(initialFetchTimer);
-    fetchTimer = flushTimer = pruneTimer = initialFetchTimer = null;
+    fetchTimer = flushTimer = pruneTimer = stationIndexTimer = initialFetchTimer = null;
     for (const label of [...buckets.keys()]) flushBucket(label, true);
     unsubscribes.forEach((f) => f());
     unsubscribes = [];
     store = null;
+    scoreboardCache = null;
     app.debug("Plugin Forecast Skill stopped");
   };
 
   plugin.schema = {
     type: "object",
     properties: {
+      autoDiscoverViva: {
+        type: "boolean",
+        title:
+          "Auto-discover ViVa stations (coordinates fetched from the ViVa API for every station the viva plugin publishes)",
+        default: true,
+      },
       locations: {
         type: "array",
-        title: "Locations (observation truth sources)",
+        title: "Manual locations (optional when auto-discovery is on)",
         items: {
           type: "object",
           required: ["label", "latitude", "longitude", "dirPath"],

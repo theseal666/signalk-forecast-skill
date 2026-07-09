@@ -11,7 +11,7 @@ actually happens. By race morning you know whether to plan around ECMWF,
 the high-resolution Nordic model, or neither — and whether your trusted
 model habitually reads a few degrees left or right at your racecourse.
 
-**Status: M1 — fetch & archive.** Forecasts from four models (ECMWF, GFS,
+**Status: M2+M3 — verification and webapp.** Forecasts (4 models, 8-day horizon) and station observations are archived, paired and scored per location and lead-time bucket, with a webapp scoreboard. ViVa station coordinates auto-discover. See [PLAN.md](PLAN.md).
 ICON, MET Norway via Open-Meteo) and station observations are being
 collected and archived; verification math and the scoreboard land in M2.
 See [PLAN.md](PLAN.md) for the full design — architecture, provider
