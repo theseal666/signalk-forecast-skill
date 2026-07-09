@@ -1,7 +1,8 @@
 # signalk-forecast-skill — Design Plan
 
-Status: **planning** (July 2026). Nothing below is built yet; this document
-is the blueprint.
+Status: **M2+M3 live** (July 2026). Archive, verification, scoreboard
+endpoint and webapp are running. M4 (SMHI/met.no adapters, SK path
+publishing, npm release) is next. See README for current state.
 
 ## Goal
 

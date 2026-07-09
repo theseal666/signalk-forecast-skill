@@ -4,7 +4,8 @@
   "description": "Scores weather forecast models against observed wind — which model fits your waters best",
   "main": "index.js",
   "keywords": [
-    "signalk-node-server-plugin"
+    "signalk-node-server-plugin",
+    "signalk-webapp"
   ],
   "author": "theseal666",
   "license": "ISC",
