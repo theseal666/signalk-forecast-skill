@@ -60,6 +60,43 @@ main {
     font-style: italic;
 }
 
+/* Composite skill panel — always visible headline ranking */
+#composite-panel {
+    background: #1a1f1a;
+    border: 1px solid #2a3a2a;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 28px;
+}
+
+.section-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #777;
+    margin-bottom: 14px;
+}
+
+.bucket-section-title {
+    margin-bottom: 16px;
+}
+
+.section-note {
+    font-size: 0.7rem;
+    color: #555;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+/* Small composite % badge shown inline in per-bucket rows */
+.composite-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    color: #88a;
+    margin-left: 6px;
+    font-weight: normal;
+}
+
 /* Grouped bar chart: one row per lead-time bucket, one bar per model */
 .bucket-row {
     display: grid;

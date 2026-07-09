@@ -39,10 +39,71 @@ function formatValue(v, meta) {
     return (meta.signed && v > 0 ? "+" : "") + s + meta.unit;
 }
 
+// Build one bar-line div (shared by composite panel and per-bucket chart)
+function makeBarLine(labelText, value, barWidthPct, color, valueText, note) {
+    const line = document.createElement("div");
+    line.className = "bar-line";
+
+    const name = document.createElement("div");
+    name.className = "model-name";
+    name.textContent = labelText;
+
+    const track = document.createElement("div");
+    track.className = "bar-track";
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    fill.style.width = Math.max(2, barWidthPct) + "%";
+    fill.style.backgroundColor = color;
+    track.appendChild(fill);
+
+    const val = document.createElement("div");
+    val.className = "bar-value";
+    val.innerHTML = valueText + (note ? ` <span class="bar-n">${note}</span>` : "");
+
+    line.appendChild(name);
+    line.appendChild(track);
+    line.appendChild(val);
+    return line;
+}
+
+function renderComposite() {
+    const panel = document.getElementById("composite-bars");
+    panel.innerHTML = "";
+
+    const loc = locationEntry();
+    if (!scoreboard || !loc) return;
+
+    const models = loc.models
+        .filter(m => m.composite != null)
+        .sort((a, b) => b.composite - a.composite);
+
+    if (models.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "not enough change events yet — needs a few days of data";
+        panel.appendChild(empty);
+        return;
+    }
+
+    models.forEach(m => {
+        const pct = Math.round(m.composite * 100);
+        panel.appendChild(makeBarLine(
+            modelLabel(m.model),
+            m.composite,
+            pct,
+            colorFor(1 - m.composite),
+            `<strong>${pct}%</strong>`,
+            null
+        ));
+    });
+}
+
 function render() {
     const chart = document.getElementById("chart");
     const hint = document.getElementById("hint");
     chart.innerHTML = "";
+
+    renderComposite();
 
     const loc = locationEntry();
     if (!scoreboard || !loc) {
@@ -52,11 +113,13 @@ function render() {
     hint.textContent = "";
 
     const meta = METRIC_META[currentMetric];
+    document.getElementById("metric-label").textContent =
+        " — " + document.getElementById("metric-select").selectedOptions[0].text;
 
     scoreboard.buckets.forEach((bucket, bi) => {
         // gather this bucket's value for every model
         const rows = loc.models
-            .map(m => ({ model: m.model, cell: m.buckets[bi] }))
+            .map(m => ({ model: m.model, cell: m.buckets[bi], composite: m.composite }))
             .filter(r => r.cell && r.cell.n > 0 && r.cell[currentMetric] != null);
 
         const row = document.createElement("div");
@@ -82,32 +145,22 @@ function render() {
                 const mag = Math.abs(v);
                 let badness;
                 if (meta.lowerBetter) badness = mag / maxMag;
-                else badness = 1 - Math.max(0, Math.min(1, v)); // skill: 1 good, <=0 bad
+                else badness = 1 - Math.max(0, Math.min(1, v));
 
-                const line = document.createElement("div");
-                line.className = "bar-line";
+                // Add composite badge next to model name so ranking is
+                // always visible regardless of which metric is selected
+                const composite = r.composite != null
+                    ? ` <span class="composite-badge">${Math.round(r.composite * 100)}%</span>`
+                    : "";
 
-                const name = document.createElement("div");
-                name.className = "model-name";
-                name.textContent = modelLabel(r.model);
-
-                const track = document.createElement("div");
-                track.className = "bar-track";
-                const fill = document.createElement("div");
-                fill.className = "bar-fill";
-                fill.style.width = Math.max(2, (mag / maxMag) * 100) + "%";
-                fill.style.backgroundColor = colorFor(badness);
-                track.appendChild(fill);
-
-                const val = document.createElement("div");
-                val.className = "bar-value";
-                val.innerHTML = formatValue(v, meta) +
-                    ` <span class="bar-n">n=${r.cell.n}</span>`;
-
-                line.appendChild(name);
-                line.appendChild(track);
-                line.appendChild(val);
-                bars.appendChild(line);
+                bars.appendChild(makeBarLine(
+                    modelLabel(r.model),
+                    v,
+                    (mag / maxMag) * 100,
+                    colorFor(badness),
+                    formatValue(v, meta) + composite,
+                    `n=${r.cell.n}`
+                ));
             });
         }
 

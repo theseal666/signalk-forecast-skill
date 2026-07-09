@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Forecast Skill</title>
-    <link rel="stylesheet" href="style.css?v=0.2.0">
+    <link rel="stylesheet" href="style.css?v=0.3.0">
 </head>
 <body>
     <div id="dashboard">
@@ -26,10 +26,21 @@
             <div class="control legend" id="window-info"></div>
         </header>
         <main>
+            <div id="composite-panel">
+                <div class="section-title">
+                    Composite skill score
+                    <span class="section-note"> — change-event accuracy, ≤ 48 h lead, 0–100 %</span>
+                </div>
+                <div id="composite-bars"></div>
+            </div>
+            <div class="section-title bucket-section-title">
+                Per lead-time detail
+                <span class="section-note" id="metric-label"></span>
+            </div>
             <p id="hint"></p>
             <div id="chart"></div>
         </main>
     </div>
-    <script src="app.js?v=0.2.0"></script>
+    <script src="app.js?v=0.3.0"></script>
 </body>
 </html>
