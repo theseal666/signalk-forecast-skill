@@ -204,8 +204,68 @@ just path-convention coupling, no code dependency).
 - **M3 — webapp**: scoreboard view, then spaghetti chart.
 - **M4 — breadth**: SMHI + met.no adapters, per-bucket UI, SK path
   publishing, npm release.
-- **M5 (optional, still decoupled)**: windshift's dashboard overlays
+- **M5 — composite skill score (0–100 %)**: a single headline number per
+  model that weights all data with emphasis on *detecting changes correctly
+  and on time*. See the design note below.
+- **M6 (optional, still decoupled)**: windshift's dashboard overlays
   `/curves` output on its waterfall via HTTP — no code sharing.
+
+### Design note — composite skill score (M5)
+
+The point-by-point dirMAE and persistence skill in M2 answer "how far off is
+this model on average". The composite score should answer "how reliable is
+this model at catching what actually changes and when".
+
+**Why the current metrics fall short for this question:**
+A model that nails the steady-state direction but misses every frontal passage
+scores a low MAE and decent skill despite being practically useless before a
+race. A model that predicts a 20° veer 3 h early is more useful than one that
+never predicts it — but both score equally badly in a point-by-point sense.
+
+**Proposed approach — change-event scoring:**
+
+1. **Extract inflection points** from both the forecast and observation
+   time series using the same zigzag + threshold detector already in
+   signalk-windshift (`windshiftAnalysis.js` is off-limits as a dependency,
+   but the algorithm is short and can be re-implemented in `verify.js` as a
+   pure function). Threshold: ≥ 10° net swing confirms a change event.
+
+2. **Match events**: for each observed event, find the nearest forecast event
+   within a ±6 h window.
+   - **Hit**: match found — record timing error (hours) and direction
+     magnitude error (degrees).
+   - **Miss**: no forecast event within the window — heavy penalty.
+   - **False alarm**: a forecast event with no observed match — medium penalty.
+
+3. **Per-event score (0–100):**
+   ```
+   timing_score   = max(0, 1 − |timing_error_h| / 6)   // 6 h tolerance
+   direction_score = max(0, 1 − |dir_error_deg| / 30)  // 30° tolerance
+   event_score    = 0.6 × timing_score + 0.4 × direction_score
+   ```
+   Weighting (0.6 / 0.4) prioritises getting the *when* right over the
+   *how much*, which matches tactical use: "a shift is coming in an hour"
+   is the decision-critical information.
+
+4. **Aggregate:**
+   ```
+   hits_score     = mean(event_score) over all hits
+   recall         = hits / (hits + misses)
+   precision      = hits / (hits + false_alarms)
+   composite      = hits_score × recall × precision × 100
+   ```
+   This collapses to 0 if the model either misses everything or cries wolf
+   constantly, and reaches 100 only if it correctly catches every change with
+   good timing and magnitude.
+
+5. **Lead-time weighting**: apply the same (model, location, lead-time bucket)
+   breakdown as M2 — the composite score at 6 h should be much higher than at
+   5 d, and a model that degrades gracefully is more useful than one that
+   collapses sharply.
+
+**Display**: a new "Composite" column in the scoreboard table (color-coded
+green → red) alongside the existing dirMAE and skill bars. The `/scoreboard`
+response gains a `composite` field per bucket. No new endpoint needed.
 
 ## Risks & notes
 
