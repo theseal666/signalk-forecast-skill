@@ -560,6 +560,10 @@ useful single number — it should be what a sailor sees first.
 
 **Proposed layout:**
 
+Add distance in nautical miles to the station from the boat at the current time, 
+sort stations from closest to farthest.
+look at Screenshot 2026-07-09 at 22.41.01 in /IMG
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ Location ▾   [Score] [Detail] [Spaghetti]   7d · 10:05  │  ← tab bar
