@@ -44,16 +44,16 @@ SignalK conventions:
 
 ```
                  ┌──────────────────────────────────────────────┐
-                 │ providers/  (one adapter per source)          │
-  Open-Meteo ───▶│  openMeteo.js  — many models via one API      │
-  SMHI      ───▶│  smhi.js       — later                        │
-  met.no    ───▶│  metno.js      — later                        │
+                 │ providers/  (one adapter per source)         │
+  Open-Meteo ───▶│  openMeteo.js  — many models via one API     │
+  SMHI       ───▶│  smhi.js       — later                       │
+  met.no     ───▶│  metno.js      — later                       │
                  └──────────────┬───────────────────────────────┘
                                 │ normalized forecast runs
                                 ▼
    SignalK paths      ┌──────────────────┐        ┌─────────────┐
-   (ViVa stations, ──▶│    store.js      │◀──────▶│  disk (ndjson│
-    boat wind)        │  obs + forecasts │        │  per day)    │
+   (ViVa stations, ──▶│    store.js      │◀──────▶│ disk (ndjson│
+    boat wind)        │  obs + forecasts │        │ per day)    │
                       └────────┬─────────┘        └─────────────┘
                                │ pairs (forecast value, observed value)
                                ▼
@@ -210,62 +210,99 @@ just path-convention coupling, no code dependency).
 - **M6 (optional, still decoupled)**: windshift's dashboard overlays
   `/curves` output on its waterfall via HTTP — no code sharing.
 
-### Design note — composite skill score (M5)
+### Design note — composite skill score (M5) — IMPLEMENTED in verify.js
 
 The point-by-point dirMAE and persistence skill in M2 answer "how far off is
-this model on average". The composite score should answer "how reliable is
-this model at catching what actually changes and when".
+this model on average". The composite score answers "how reliable is this
+model at catching what actually changes and when" — the question a sailor
+asks before a race.
 
 **Why the current metrics fall short for this question:**
 A model that nails the steady-state direction but misses every frontal passage
-scores a low MAE and decent skill despite being practically useless before a
-race. A model that predicts a 20° veer 3 h early is more useful than one that
-never predicts it — but both score equally badly in a point-by-point sense.
+scores low MAE and decent skill despite being nearly useless before a race.
 
-**Proposed approach — change-event scoring:**
+**What 100% means:** every observed change event was predicted (recall = 1),
+every predicted event happened (precision = 1), timing error = 0, direction
+and speed magnitude errors = 0. Calibrated for race-morning intelligence,
+not a theoretical perfect model.
 
-1. **Extract inflection points** from both the forecast and observation
-   time series using the same zigzag + threshold detector already in
-   signalk-windshift (`windshiftAnalysis.js` is off-limits as a dependency,
-   but the algorithm is short and can be re-implemented in `verify.js` as a
-   pure function). Threshold: ≥ 10° net swing confirms a change event.
+**Implementation — `verify.js`:** `unwrapDir()` → `zigzagEvents()` →
+`matchEvents()` → `computeComposite()`.
 
-2. **Match events**: for each observed event, find the nearest forecast event
-   within a ±6 h window.
-   - **Hit**: match found — record timing error (hours) and direction
-     magnitude error (degrees).
-   - **Miss**: no forecast event within the window — heavy penalty.
-   - **False alarm**: a forecast event with no observed match — medium penalty.
+Thresholds:
 
-3. **Per-event score (0–100):**
-   ```
-   timing_score   = max(0, 1 − |timing_error_h| / 6)   // 6 h tolerance
-   direction_score = max(0, 1 − |dir_error_deg| / 30)  // 30° tolerance
-   event_score    = 0.6 × timing_score + 0.4 × direction_score
-   ```
-   Weighting (0.6 / 0.4) prioritises getting the *when* right over the
-   *how much*, which matches tactical use: "a shift is coming in an hour"
-   is the decision-critical information.
+| Variable | Event threshold | Scoring tolerance (→ score 0) |
+|---|---|---|
+| Direction | ≥ 10° swing | ± 15° magnitude |
+| Wind speed | ≥ 1.5 m/s swing | ± 1.5 m/s magnitude |
+| Timing (both) | — | ± 3 h (score 0 at boundary, 1 at 0 h) |
 
-4. **Aggregate:**
-   ```
-   hits_score     = mean(event_score) over all hits
-   recall         = hits / (hits + misses)
-   precision      = hits / (hits + false_alarms)
-   composite      = hits_score × recall × precision × 100
-   ```
-   This collapses to 0 if the model either misses everything or cries wolf
-   constantly, and reaches 100 only if it correctly catches every change with
-   good timing and magnitude.
+Component weights (sum to 1.0 when all data present):
 
-5. **Lead-time weighting**: apply the same (model, location, lead-time bucket)
-   breakdown as M2 — the composite score at 6 h should be much higher than at
-   5 d, and a model that degrades gracefully is more useful than one that
-   collapses sharply.
+| Component | Weight |
+|---|---|
+| Direction-event timing | 0.35 |
+| Direction-event magnitude | 0.20 |
+| Speed-event timing | 0.20 |
+| Speed-event magnitude | 0.15 |
+| Baro trend | 0.10 — reserved, not scored until pressure path is configured |
 
-**Display**: a new "Composite" column in the scoreboard table (color-coded
-green → red) alongside the existing dirMAE and skill bars. The `/scoreboard`
-response gains a `composite` field per bucket. No new endpoint needed.
+If speed or baro data is absent the weights are redistributed proportionally
+across the components that did score.
+
+Aggregate per event set:
+```
+component = recall × precision × mean_hit_score
+```
+
+Scope: one composite per (location, model) over all ≤ 48 h lead forecast
+hours. `/scoreboard` gains a `composite` field (0–1) on each model entry.
+Display as percentage (0–100 %). Per-bucket composite is future work.
+
+### Design note — station picker UI (M4 / configuration)
+
+Goal: before a race weekend, the user picks which ViVa stations to score
+against, without editing JSON config. Different races need different stations
+— Vinga for Gothenburg races, Landsort/Björn for Stockholm, etc.
+
+**Proposed UX:**
+- A `/plugins/forecast-skill/stations` endpoint returns the full ViVa station
+  index (name, slug, lat, lon) fetched from the ViVa API (already cached in
+  `vivaLocations.js`). Response shape:
+  ```json
+  [{ "slug": "vinga", "name": "Vinga", "latitude": 57.63, "longitude": 11.60 }, ...]
+  ```
+- The webapp config panel shows a searchable dropdown/list of all ViVa
+  stations. The user picks ≤ N stations and hits Save.
+- Save POSTs to `/plugins/forecast-skill/config/locations`, which calls
+  `app.savePluginOptions()` (the same mechanism the admin UI uses), so the
+  selection survives restarts without touching files manually.
+- Lat/lon come from the ViVa index — the user never types coordinates.
+- The boat can also appear in the list (uses `environment.wind.directionTrue`
+  + live GPS position) as a special entry "Boat (GPS)".
+
+**Config schema change:** `locations` stays as-is server-side (array of
+`{label, latitude, longitude, dirPath, speedPath}`). The station-picker UI
+just builds these objects from the ViVa index and POSTs them — no schema
+migration needed.
+
+### Design note — additional forecast model providers (future)
+
+Open-Meteo is keyless and covers 4–5 models well. Additional providers
+will be added as separate adapters in `providers/`:
+
+- **SMHI open data** — Swedish high-resolution model, keyless, good for
+  Swedish coastal waters, hourly 10 m wind. Requires descriptive User-Agent.
+- **met.no Locationforecast 2.0** — Norwegian met office, keyless, good
+  Nordic model. Requires identifying User-Agent header per their ToS.
+- **Paid/private models** — any provider that returns JSON with hourly
+  `(direction_deg, speed_ms)` can be wrapped in a one-file adapter. The
+  adapter contract is minimal (see Architecture section above). API keys go
+  in plugin config as `providers[].apiKey`, stored in SignalK plugin-config
+  and never committed.
+
+The scoreboard and composite logic are model-agnostic — adding a provider
+just means it shows up as new rows in the scoreboard table.
 
 ## Risks & notes
 

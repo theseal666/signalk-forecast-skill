@@ -251,6 +251,20 @@ module.exports = function (app) {
       });
     });
 
+    // Full ViVa station index — used by the webapp station picker UI.
+    // Returns [{slug, name, latitude, longitude}] sorted by name.
+    router.get("/stations", (req, res) => {
+      if (!stationIndex) {
+        return res.status(503).json({ error: "station index not yet loaded" });
+      }
+      const list = [];
+      for (const [slug, st] of stationIndex) {
+        list.push({ slug, name: st.name || slug, latitude: st.latitude, longitude: st.longitude });
+      }
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      res.json(list);
+    });
+
     // The verification result: models × locations × lead-time buckets
     router.get("/scoreboard", (req, res) => {
       if (!store || !cfg) return res.status(503).json({ error: "plugin not started" });
