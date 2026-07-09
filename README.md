@@ -11,11 +11,13 @@ actually happens. By race morning you know whether to plan around ECMWF,
 the high-resolution Nordic model, or neither — and whether your trusted
 model habitually reads a few degrees left or right at your racecourse.
 
-**Status: M2+M3 — verification and webapp.** Forecasts (4 models, 8-day horizon) and station observations are archived, paired and scored per location and lead-time bucket, with a webapp scoreboard. ViVa station coordinates auto-discover. See [PLAN.md](PLAN.md).
-ICON, MET Norway via Open-Meteo) and station observations are being
-collected and archived; verification math and the scoreboard land in M2.
-See [PLAN.md](PLAN.md) for the full design — architecture, provider
-adapters, verification math, storage layout, endpoints and milestones.
+**Status: M2+M3 — verification and webapp.** Forecasts (4 models, 8-day
+horizon) and station observations are archived, paired and scored per
+location and lead-time bucket (6h/12h/24h/2d/3d/5d/7d), shown in a webapp
+scoreboard with location and metric dropdowns. ViVa station coordinates
+auto-discover from the ViVa API. See [PLAN.md](PLAN.md) for the full design —
+architecture, provider adapters, verification math, storage layout,
+endpoints and milestones.
 
 Fully independent of (but a good neighbor to)
 [signalk-windshift](https://github.com/theseal666/signalk-windshift) and
