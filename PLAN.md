@@ -350,6 +350,40 @@ milestone; same pattern as FMI but REST/JSON instead of WFS/XML.
 DMI. Good coverage of Danish straits and Kattegat — relevant for
 Gothenburg Race, Skagerrak crossings.
 
+#### United Kingdom — Met Office
+
+Web-facing observations: `weather.metoffice.gov.uk/specialist-forecasts/coast-and-sea/observations`
+
+The underlying data is served by two APIs (both require a free registration key):
+
+**Option A — DataPoint** (older, simpler):
+```
+https://datapoint.metoffice.gov.uk/public/data/val/wxobs/all/json/all
+  ?res=hourly&key=<apikey>
+```
+Returns all UK land+coastal stations as one JSON payload. Wind speed in
+mph (multiply by 0.44704 → m/s), direction in degrees. Station metadata
+(lat, lon, name, id) returned in the same response. Most straightforward
+to implement.
+
+**Option B — Weather DataHub** (newer, recommended for new integrations):
+`https://data.hub.api.metoffice.gov.uk/` — REST/JSON, site-specific
+queries, better resolution. Requires client-ID + secret (free; OAuth2
+client-credentials flow).
+
+**Key UK coastal stations for offshore/coastal racing:**
+Lizard, Portland Bill, St. Catherine's Point, Channel Lightvessel,
+Calshot (Solent), Humber, Sandettie LV (Dover Strait), Valentia
+(Irish Sea / Fastnet), Malin Head, Round Island (Scilly).
+
+**Implementation note:** DataPoint wind speed is in mph and direction is
+in degrees from north — both need unit conversion before storage. The
+station list response includes all stations; filter to coastal by
+elevation < 50 m or by bounding box to avoid inland noise.
+
+Register at: `register.metoffice.gov.uk/myaccount/register` (DataPoint
+key issued immediately).
+
 #### General adapter contract for observation providers
 
 Each country adapter should implement:
