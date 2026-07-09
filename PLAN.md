@@ -207,7 +207,15 @@ just path-convention coupling, no code dependency).
 - **M5 — composite skill score (0–100 %)**: a single headline number per
   model that weights all data with emphasis on *detecting changes correctly
   and on time*. See the design note below.
-- **M6 (optional, still decoupled)**: windshift's dashboard overlays
+- **M6 — per-timeslot spaghetti score**: for every verified forecast hour
+  show which model was closest and by how much. The aggregate composite
+  tells you the winner over 7 days; this shows the *texture* — does ECMWF
+  dominate mornings, does GFS nail frontal passages, does ICON fall apart
+  at 24h? See design note below.
+- **M7 — composite as default view**: score panel moves to the primary
+  landing view; per-bucket detail chart becomes the secondary tab.
+  See design note below.
+- **M8 (optional, still decoupled)**: windshift's dashboard overlays
   `/curves` output on its waterfall via HTTP — no code sharing.
 
 ### Design note — composite skill score (M5) — IMPLEMENTED in verify.js
@@ -506,6 +514,77 @@ will be added as separate adapters in `providers/`:
 
 The scoreboard and composite logic are model-agnostic — adding a provider
 just means it shows up as new rows in the scoreboard table.
+
+### Design note — per-timeslot spaghetti score (M6)
+
+The aggregate composite (M5) answers "which model is best this week".
+The per-timeslot score answers "which model was best *at 14:00 yesterday*"
+— the granularity that reveals temporal patterns: morning sea-breeze onset,
+frontal passage timing, model degradation at specific lead times.
+
+**What to show:** for each verified forecast hour `t`, compute a simple
+per-timeslot winner score for every model:
+
+```
+timeslot_score(model, t) = 1 − |dir_error_deg| / 180   (0 = worst, 1 = perfect)
+```
+
+Combined with speed error if available:
+```
+timeslot_score = 0.7 × dir_score + 0.3 × speed_score
+```
+
+**Display — spaghetti-score timeline:** a time-series chart (uPlot, same
+dark style) with one line per model, Y axis = timeslot score 0–1.
+- Each model drawn in its own color (same palette as the scoreboard)
+- Observed wind overlaid as a bold reference line (secondary Y axis,
+  direction in degrees) so you can see WHY a model scored low at a
+  specific time — a direction error during a frontal passage
+- Selectable time window (last 24h / 48h / 7d)
+- Hovering a timestamp shows all models' scores + the direction errors
+
+**Backend — new `/curves` endpoint:** already planned; extend it to return
+per-hour `{ t, observed_dir, observed_speed, models: { model_id: { dir, speed, score } } }`.
+The webapp builds the spaghetti chart from this; `computeScoreboard` is
+unchanged (aggregate stats still come from there).
+
+**Insight this unlocks:** if ECMWF scores 0.9 every morning and 0.4 every
+afternoon, you know to trust it for the pre-start briefing but discard it
+for the afternoon race. No aggregate score reveals that pattern.
+
+### Design note — composite as default view (M7)
+
+Currently the webapp opens on the "Direction error (°)" metric with the
+composite panel as a secondary header above it. The composite is the most
+useful single number — it should be what a sailor sees first.
+
+**Proposed layout:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Location ▾   [Score] [Detail] [Spaghetti]   7d · 10:05  │  ← tab bar
+├─────────────────────────────────────────────────────────┤
+│  COMPOSITE SKILL SCORE  (default landing tab)           │
+│                                                         │
+│  ECMWF IFS   ██████████████████░░  73%                  │
+│  MET Norway  ████████████████░░░░  65%                  │
+│  GFS         ████████░░░░░░░░░░░░  44%                  │
+│  ICON        ██████░░░░░░░░░░░░░░  38%                  │
+│                                                         │
+│  (small print: n events, window, last updated)          │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Score tab** (default): composite ranking only, full-height, large bars.
+  Clean pre-race "which model?" answer.
+- **Detail tab**: the current per-bucket bar chart (dirMAE / bias / skill /
+  speed error), metric dropdown, all models.
+- **Spaghetti tab** (M6): per-timeslot score timeline + observed wind overlay.
+
+**Implementation:** replace the current single-page layout with a
+three-tab structure. Tab state in URL hash (`#score`, `#detail`,
+`#spaghetti`) so bookmarks and back-button work. No routing library needed
+— just `hashchange` listener + show/hide divs.
 
 ## Risks & notes
 
