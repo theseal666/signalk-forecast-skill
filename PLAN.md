@@ -337,18 +337,110 @@ Key details:
 4. Verification, composite, and scoreboard logic are unchanged — FMI
    observations land in the same ndjson format.
 
-#### Norway — met.no observations (Frost API)
+#### Norway — met.no (Frost API) — Skagerrak / Kattegat approach
 
-Norwegian met office observations via `https://frost.met.no/observations/v0.jsonld`
-Requires a **free API key** (register at frost.met.no). Good coastal
-station network (Utsira, Lista, Oksøy, Torungen). Target for a later
-milestone; same pattern as FMI but REST/JSON instead of WFS/XML.
+`https://frost.met.no/observations/v0.jsonld` — free API key (register
+at frost.met.no). REST/JSON. Key stations for Nordic offshore sailing:
+Utsira (open ocean reference), Lista, Oksøy, Torungen, Ferder (Oslo
+fjord entrance), Jomfruland. Relevant for Gothenburg Race Kattegat leg
+and North Sea crossings.
 
-#### Denmark — DMI open data
+#### Denmark — DMI — Kattegat / Øresund / Bælt / western Baltic
 
-`https://dmigw.govcloud.dk/v2/metObs/` — requires a free API key from
-DMI. Good coverage of Danish straits and Kattegat — relevant for
-Gothenburg Race, Skagerrak crossings.
+`https://dmigw.govcloud.dk/v2/metObs/` — free API key (register at
+`dmiapi.govcloud.dk`). REST/JSON. 10-minute observation cadence.
+
+Key stations:
+- **Kattegat / approach**: Skagen (northernmost tip), Anholt (mid-
+  Kattegat reference), Læsø
+- **Øresund / Sound**: Drogden LV (narrows), Helsingør, Kastrup
+- **Great Belt / Little Belt**: Sprogø, Gedser (southernmost — gateway
+  to the Baltic)
+- **SW Baltic**: Bornholm (exposed, mid-Baltic reference)
+
+Query pattern:
+```
+GET /v2/metObs/collections/observation/items
+  ?period=latest&stationId=<id>&parameterId=wind_speed,wind_dir
+  &api-key=<key>
+```
+Returns GeoJSON; wind speed in m/s, direction in degrees (convert to
+rad). Station list available at `/v2/metObs/collections/station/items`.
+
+#### Germany — DWD (Deutscher Wetterdienst) — western / central Baltic
+
+DWD open data: **no API key required**. File-based, updated every 10 min.
+```
+https://opendata.dwd.de/weather/weather_reports/synoptic/germany/10_minutes/
+```
+JSON format (SYNOP decode) per station. Station list + metadata:
+```
+https://opendata.dwd.de/climate_environment/CDC/help/stations_list_SYNOP_KL.txt
+```
+
+Key Baltic/coastal stations:
+- **Kiel Fjord / Fehmarn**: Kiel-Holtenau, Fehmarn (Puttgarden)
+- **Western Baltic**: Warnemünde, Rostock-Warnemünde, Rügen (Arkona —
+  most exposed Baltic station in Germany), Boltenhagen
+- **Flensburg Fjord / Kattegat gate**: Flensburg, Schleswig
+
+Wind units: m/s, direction in degrees from north. DWD also publishes
+BSH-operated lightship/buoy data for Darßer Schwelle and Fehmarnbelt
+(excellent offshore references, no coast-shelter effect).
+
+**Implementation note:** DWD delivers current obs as one JSON file per
+station. Fetching ~10 relevant stations every 10 min is trivial; a
+station-list cache avoids re-fetching metadata.
+
+#### Poland — IMGW — eastern Baltic / Gulf of Gdańsk
+
+**Keyless JSON API** — no registration needed:
+```
+https://danepubliczne.imgw.pl/api/data/synop
+```
+Returns current observations for all synoptic stations as a JSON array.
+Fields: `kierunek_wiatru` (direction, degrees), `predkosc_wiatru` (speed,
+m/s). Updated hourly.
+
+Key stations (filter by id or name in the response):
+- **Hel Peninsula** (`stacja: "Hel"`) — most wind-exposed Polish station,
+  excellent mid-Baltic reference, used by Baltic offshore race fleets
+- **Gdańsk/Gdynia, Kołobrzeg, Ustka, Świnoujście** — full coast coverage
+
+Station coordinates: returned inline in each record (`godzina`,
+`stacja`, `id_stacji`, `lat`, `lon` — some records; otherwise use the
+separate `/api/data/synop/id/<id>` endpoint).
+
+#### Estonia — Ilmateenistus — Gulf of Finland / Saaremaa
+
+**Keyless XML API**, updated every 10 minutes:
+```
+https://www.ilmateenistus.ee/ilma_andmed/xml/observations.php
+```
+Returns all Estonian stations as XML. Wind speed in m/s, direction in
+degrees. Simple XML structure, no namespace complexity.
+
+Key stations for Gulf of Finland and western Estonian archipelago racing:
+- **Osmussaar** — small island, most exposed NW Estonian station,
+  open-ocean reference for Gulf of Finland approaches
+- **Vilsandi** (Saaremaa W tip) — Saaremaa race reference
+- **Sõrve** (Saaremaa S tip) — Irbe Strait gateway
+- **Pakri** (near Paldiski) — Gulf of Finland western approach
+- **Kunda, Narva-Jõesuu** — eastern Gulf of Finland
+
+**Parse note:** `<name>`, `<latitude>`, `<longitude>`, `<windspeed>`,
+`<winddirection>` fields in each `<station>` element. Latitude/longitude
+present in the XML — no separate station-index fetch needed.
+
+#### Latvia & Lithuania — lower priority, completeness
+
+- **Latvia LVĢMC**: `meteo.lv` — limited English API docs; key station
+  Kolka (Gulf of Riga entrance), Pāvilosta, Liepāja.
+- **Lithuania LHMT**: `meteo.lt` — key station Klaipėda (only Lithuanian
+  sailing port). API documentation sparse in English.
+
+Both are relevant if racing in the Gulf of Riga (Riga–Gotland) or
+eastern Baltic. Implement after higher-priority sources are stable.
 
 #### United Kingdom — Met Office
 
