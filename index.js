@@ -108,8 +108,24 @@ module.exports = function (app) {
 
   async function refreshStationIndex() {
     try {
-      stationIndex = await fetchStationIndex();
-      app.debug(`ViVa station index loaded: ${stationIndex.size} slugs`);
+      stationIndex = await fetchStationIndex(); // { bySlug, byId }
+      app.debug(`ViVa station index loaded: ${stationIndex.bySlug.size} slugs`);
+      // Resolve any station IDs configured by the user
+      for (const id of cfg.vivaStationIds) {
+        const st = stationIndex.byId.get(Number(id));
+        if (!st) {
+          app.debug(`ViVa station ID ${id} not found in index — check the number`);
+          continue;
+        }
+        if (knownSlugs.has(st.slug)) continue;
+        addLocation({
+          label: st.slug,
+          latitude: st.latitude,
+          longitude: st.longitude,
+          dirPath: `environment.observations.viva.${st.slug}.wind.directionTrue`,
+          speedPath: `environment.observations.viva.${st.slug}.wind.averageSpeed`,
+        });
+      }
     } catch (e) {
       app.debug("ViVa station index fetch failed: " + e.message);
     }
@@ -162,6 +178,7 @@ module.exports = function (app) {
           ? options.models
           : openMeteo.defaultModels,
       autoDiscoverViva: options.autoDiscoverViva !== false,
+      vivaStationIds: (options.vivaStationIds || []).map(Number).filter(Boolean),
       fetchIntervalHours: options.fetchIntervalHours || 3,
       retentionDays: options.retentionDays || 14,
       verifyWindowDays: options.verifyWindowDays || 7,
@@ -180,7 +197,7 @@ module.exports = function (app) {
       knownSlugs.add(loc.label);
     }
 
-    if (cfg.autoDiscoverViva) {
+    if (cfg.autoDiscoverViva || cfg.vivaStationIds.length > 0) {
       refreshStationIndex();
       stationIndexTimer = setInterval(refreshStationIndex, 24 * 3600 * 1000);
     } else if (cfg.locations.length === 0) {
@@ -208,7 +225,7 @@ module.exports = function (app) {
           if (m && !knownSlugs.has(m[1])) {
             const slug = m[1];
             knownSlugs.add(slug); // only look each slug up once
-            const st = stationIndex.get(slug);
+            const st = stationIndex.bySlug.get(slug);
             if (st) {
               addLocation({
                 label: slug,
@@ -268,7 +285,7 @@ module.exports = function (app) {
         return res.status(503).json({ error: "station index not yet loaded" });
       }
       const list = [];
-      for (const [slug, st] of stationIndex) {
+      for (const [slug, st] of stationIndex.bySlug) {
         list.push({ slug, name: st.name || slug, latitude: st.latitude, longitude: st.longitude });
       }
       list.sort((a, b) => a.name.localeCompare(b.name));
@@ -331,29 +348,43 @@ module.exports = function (app) {
   plugin.schema = {
     type: "object",
     properties: {
+      vivaStationIds: {
+        type: "array",
+        title: "ViVa stations to score",
+        description:
+          "Add stations by number — find the number in the ViVa web UI or the station list at /plugins/forecast-skill/stations. " +
+          "Example: Svenska Högarna = 240, Vinga = 2113, Landsort = 2108, Ölands södra = 2111. " +
+          "Save and restart — the plugin fetches name and GPS coordinates automatically. " +
+          "No lat/lon or SignalK path entry needed.",
+        default: [],
+        items: {
+          type: "integer",
+          title: "Station number (e.g. 240)",
+        },
+      },
       autoDiscoverViva: {
         type: "boolean",
         title:
-          "Auto-discover ViVa stations (coordinates fetched from the ViVa API for every station the viva plugin publishes)",
+          "Also auto-discover ViVa stations from the signalk-viva plugin (picks up every station it publishes, in addition to the numbers above)",
         default: true,
       },
       locations: {
         type: "array",
-        title: "Manual locations (optional when auto-discovery is on)",
+        title: "Additional manual locations (advanced — use for boat instruments or non-ViVa sources)",
         items: {
           type: "object",
           required: ["label", "latitude", "longitude", "dirPath"],
           properties: {
-            label: { type: "string", title: "Label (short, e.g. station slug)" },
+            label: { type: "string", title: "Label" },
             latitude: { type: "number", title: "Latitude" },
             longitude: { type: "number", title: "Longitude" },
             dirPath: {
               type: "string",
-              title: "SignalK path for observed wind direction (rad)",
+              title: "SignalK path for wind direction (rad)",
             },
             speedPath: {
               type: "string",
-              title: "SignalK path for observed wind speed (m/s, optional)",
+              title: "SignalK path for wind speed (m/s, optional)",
             },
           },
         },

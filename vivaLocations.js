@@ -17,23 +17,27 @@ function slugify(name) {
   );
 }
 
-// slug -> { latitude, longitude, name }. Several ViVa stations can share a
-// slug (four different "Stenungsund" sensors) — first in the list wins,
-// they sit within a mile of each other.
+// Returns { bySlug, byId } where:
+//   bySlug: slug -> { latitude, longitude, name, slug }  (first match wins for duplicate slugs)
+//   byId:   stationNumber -> same entry  (keyed by the integer station ID from the ViVa API)
 async function fetchStationIndex() {
   const res = await fetch(STATION_LIST_URL, {
     signal: AbortSignal.timeout(20000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} from ViVa station list`);
   const json = await res.json();
-  const index = new Map();
+  const bySlug = new Map();
+  const byId = new Map();
   for (const s of json.GetStationsResult.Stations) {
+    if (typeof s.Lat !== "number" || typeof s.Lon !== "number") continue;
     const slug = slugify(s.Name);
-    if (!index.has(slug) && typeof s.Lat === "number" && typeof s.Lon === "number") {
-      index.set(slug, { latitude: s.Lat, longitude: s.Lon, name: s.Name });
-    }
+    const entry = { latitude: s.Lat, longitude: s.Lon, name: s.Name, slug };
+    if (!bySlug.has(slug)) bySlug.set(slug, entry);
+    // ViVa API field name for station number: try ID then StationID
+    const id = s.ID ?? s.StationID;
+    if (id != null) byId.set(Number(id), entry);
   }
-  return index;
+  return { bySlug, byId };
 }
 
 module.exports = { slugify, fetchStationIndex };
