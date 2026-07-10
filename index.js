@@ -352,25 +352,26 @@ module.exports = function (app) {
         type: "array",
         title: "ViVa stations to score",
         description:
-          "Add stations by number — find the number in the ViVa web UI or the station list at /plugins/forecast-skill/stations. " +
-          "Example: Svenska Högarna = 240, Vinga = 2113, Landsort = 2108, Ölands södra = 2111. " +
-          "Save and restart — the plugin fetches name and GPS coordinates automatically. " +
-          "No lat/lon or SignalK path entry needed.",
+          "Add stations by number. Find the number in the URL when browsing viva.sjofartsverket.se " +
+          "(e.g. /station/204 → type 204). Full list also at /plugins/forecast-skill/stations. " +
+          "Examples: Svenska Högarna = 204, Vinga = 2113, Landsort = 2108. " +
+          "The plugin fetches name and GPS coordinates automatically — no lat/lon needed. " +
+          "These stations are ADDED to any already configured locations; nothing is lost.",
         default: [],
         items: {
           type: "integer",
-          title: "Station number (e.g. 240)",
+          title: "Station number (e.g. 204)",
         },
       },
       autoDiscoverViva: {
         type: "boolean",
         title:
-          "Also auto-discover ViVa stations from the signalk-viva plugin (picks up every station it publishes, in addition to the numbers above)",
+          "Also auto-discover ViVa stations from the signalk-viva plugin (picks up every station it publishes, in addition to the numbers above — existing discovered stations keep working)",
         default: true,
       },
       locations: {
         type: "array",
-        title: "Additional manual locations (advanced — use for boat instruments or non-ViVa sources)",
+        title: "Existing / manual locations — entries here are preserved and still active",
         items: {
           type: "object",
           required: ["label", "latitude", "longitude", "dirPath"],
