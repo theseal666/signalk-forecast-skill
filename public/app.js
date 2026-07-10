@@ -150,14 +150,30 @@ function render() {
             empty.textContent = "no verified pairs yet";
             bars.appendChild(empty);
         } else {
-            // scale bars against the largest magnitude in this bucket
+            // Absolute metrics (score, skill): bar width = actual value on 0–100 scale,
+            // so an 80% score always shows 80% fill regardless of what other models scored.
+            // Error metrics: relative to worst in bucket so differences are visible.
             const maxMag = Math.max(...rows.map(r => Math.abs(r.cell[currentMetric]))) || 1;
+            // Sort: best first
+            rows.sort((a, b) => {
+                const va = a.cell[currentMetric], vb = b.cell[currentMetric];
+                return meta.lowerBetter ? va - vb : vb - va;
+            });
             rows.forEach(r => {
                 const v = r.cell[currentMetric];
                 const mag = Math.abs(v);
-                let badness;
-                if (meta.lowerBetter) badness = mag / maxMag;
-                else badness = 1 - Math.max(0, Math.min(1, v));
+                let barPct, badness;
+                if (meta.scale != null) {
+                    // Absolute 0–100 % scale: bar length = actual score
+                    barPct = Math.max(2, Math.min(100, v * meta.scale));
+                    badness = 1 - Math.max(0, Math.min(1, v));
+                } else if (meta.lowerBetter) {
+                    barPct = (mag / maxMag) * 100;
+                    badness = mag / maxMag;
+                } else {
+                    barPct = (mag / maxMag) * 100;
+                    badness = 1 - Math.max(0, Math.min(1, v));
+                }
 
                 // Add composite badge next to model name so ranking is
                 // always visible regardless of which metric is selected
@@ -168,7 +184,7 @@ function render() {
                 bars.appendChild(makeBarLine(
                     modelLabel(r.model),
                     v,
-                    (mag / maxMag) * 100,
+                    barPct,
                     colorFor(badness),
                     formatValue(v, meta) + composite,
                     `n=${r.cell.n}`
