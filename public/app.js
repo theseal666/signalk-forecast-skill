@@ -1,14 +1,15 @@
 let scoreboard = null;
 let currentLocation = null;
-let currentMetric = "dirMAE_deg";
+let currentMetric = "score";
 
 // For error metrics lower is better; for skill higher is better. The bar
 // color goes green→red accordingly, scaled against the worst value on show.
 const METRIC_META = {
-    dirMAE_deg: { unit: "°", lowerBetter: true, digits: 1 },
-    dirBias_deg: { unit: "°", lowerBetter: true, signed: true, digits: 1 },
-    skill: { unit: "", lowerBetter: false, digits: 2 },
-    speedMAE_ms: { unit: " m/s", lowerBetter: true, digits: 1 },
+    score:        { unit: "%", lowerBetter: false, digits: 0, scale: 100 },
+    dirMAE_deg:   { unit: "°", lowerBetter: true, digits: 1 },
+    dirBias_deg:  { unit: "°", lowerBetter: true, signed: true, digits: 1 },
+    skill:        { unit: "", lowerBetter: false, digits: 2 },
+    speedMAE_ms:  { unit: " m/s", lowerBetter: true, digits: 1 },
     vectorRMSE_ms: { unit: " m/s", lowerBetter: true, digits: 1 },
 };
 
@@ -27,6 +28,16 @@ function modelLabel(id) {
     return (scoreboard && scoreboard.modelLabels && scoreboard.modelLabels[id]) || id;
 }
 
+function haversineNm(lat1, lon1, lat2, lon2) {
+    const R = 3440.065; // nautical miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // Green (good) to red (bad) across a 0..1 badness ratio
 function colorFor(badness) {
     const hue = (1 - Math.max(0, Math.min(1, badness))) * 120; // 120=green, 0=red
@@ -35,8 +46,9 @@ function colorFor(badness) {
 
 function formatValue(v, meta) {
     if (v == null) return "–";
-    const s = v.toFixed(meta.digits);
-    return (meta.signed && v > 0 ? "+" : "") + s + meta.unit;
+    const display = (meta.scale != null ? v * meta.scale : v);
+    const s = display.toFixed(meta.digits);
+    return (meta.signed && display > 0 ? "+" : "") + s + meta.unit;
 }
 
 // Build one bar-line div (shared by composite panel and per-bucket chart)
@@ -178,15 +190,27 @@ function populateLocations() {
         sel.appendChild(opt);
         return;
     }
-    scoreboard.locations.forEach(l => {
+
+    const bp = scoreboard.boatPosition;
+    const locs = scoreboard.locations.map(l => {
+        const distNm = (bp && l.latitude != null)
+            ? haversineNm(bp.lat, bp.lon, l.latitude, l.longitude)
+            : null;
+        return { ...l, distNm };
+    });
+
+    if (bp) locs.sort((a, b) => (a.distNm ?? Infinity) - (b.distNm ?? Infinity));
+
+    locs.forEach(l => {
         const opt = document.createElement("option");
         opt.value = l.label;
-        const coords = l.latitude != null ? ` (${l.latitude.toFixed(2)}, ${l.longitude.toFixed(2)})` : "";
-        opt.text = l.label + coords;
+        const dist = l.distNm != null ? ` — ${l.distNm.toFixed(0)} nm` : "";
+        opt.text = l.label + dist;
         sel.appendChild(opt);
     });
-    if (!scoreboard.locations.some(l => l.label === currentLocation)) {
-        currentLocation = scoreboard.locations[0].label;
+
+    if (!locs.some(l => l.label === currentLocation)) {
+        currentLocation = locs[0].label;
     }
     sel.value = currentLocation;
 }
@@ -196,6 +220,7 @@ function refresh() {
         if (!sb || !sb.locations) return;
         scoreboard = sb;
         populateLocations();
+        document.getElementById("metric-select").value = currentMetric;
         document.getElementById("window-info").textContent =
             `verification window: ${sb.windowDays} days · updated ${new Date(sb.generatedAt).toLocaleTimeString()}`;
         render();

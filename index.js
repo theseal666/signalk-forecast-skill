@@ -32,6 +32,7 @@ module.exports = function (app) {
   let knownSlugs = new Set();
   let stationIndex = null; // slug -> { latitude, longitude, name } from ViVa
   let scoreboardCache = null;
+  let boatPosition = null; // latest navigation.position from SignalK
 
   // per-location observation aggregation into 10-minute circular means
   let buckets = new Map(); // label -> { start, sumSin, sumCos, nDir, sumSpeed, nSpeed }
@@ -189,6 +190,15 @@ module.exports = function (app) {
 
     unsubscribes.push(
       app.streambundle.getSelfBus().forEach((pathValue) => {
+        if (
+          pathValue.path === "navigation.position" &&
+          pathValue.value &&
+          typeof pathValue.value.latitude === "number" &&
+          typeof pathValue.value.longitude === "number"
+        ) {
+          boatPosition = { lat: pathValue.value.latitude, lon: pathValue.value.longitude };
+          return;
+        }
         if (typeof pathValue.value !== "number" || isNaN(pathValue.value)) return;
 
         // Locations appear by themselves: any ViVa station the viva plugin
@@ -298,6 +308,7 @@ module.exports = function (app) {
         }
       }
       sb.modelLabels = openMeteo.modelLabels;
+      sb.boatPosition = boatPosition;
       scoreboardCache = sb;
       res.json(sb);
     });

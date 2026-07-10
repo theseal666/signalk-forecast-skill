@@ -121,6 +121,11 @@ function matchEvents(obsEvents, fcstEvents, toleranceMs) {
   return { hits, misses, falseAlarms };
 }
 
+// Per-bucket score normalisation scale for wind speed (M6).
+// A |speed_error| of this many m/s maps to score = 0; smaller errors score higher.
+// 5 m/s ≈ 10 kts — a large but plausible error in coastal sailing conditions.
+const SCORE_SPEED_SCALE_MS = 5.0;
+
 // Composite score constants — calibrated for racing use.
 // Tolerances define "perfect": a hit within ±3h timing and ±15° direction
 // scores 1.0 on those components. At the tolerance boundary the score is 0.
@@ -254,11 +259,15 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
           n: 0,
           sumAbs: 0,
           sumSigned: 0,
+          sumDirScore: 0,   // sum of max(0, 1 - |err°|/180) — M6 formula
           nSpeed: 0,
           sumSpeedAbs: 0,
+          sumSpeedScore: 0, // sum of max(0, 1 - |err_ms|/SCORE_SPEED_SCALE_MS)
           sumVec2: 0,
           nPersist: 0,
           sumPersistAbs: 0,
+          nPersistSpeed: 0,
+          sumPersistSpeedAbs: 0,
         }))
       );
     }
@@ -282,12 +291,16 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
         if (o) {
           const cell = cellsFor(run.location, run.model)[bi];
           const dErr = normalize(h.dir - o.dir);
+          const dErrDeg = Math.abs(dErr) * 180 / Math.PI;
           cell.n++;
           cell.sumAbs += Math.abs(dErr);
           cell.sumSigned += dErr;
+          cell.sumDirScore += Math.max(0, 1 - dErrDeg / 180);
           if (typeof h.speed === "number" && typeof o.speed === "number") {
+            const sErr = Math.abs(h.speed - o.speed);
             cell.nSpeed++;
-            cell.sumSpeedAbs += Math.abs(h.speed - o.speed);
+            cell.sumSpeedAbs += sErr;
+            cell.sumSpeedScore += Math.max(0, 1 - sErr / SCORE_SPEED_SCALE_MS);
             const dx = h.speed * Math.sin(h.dir) - o.speed * Math.sin(o.dir);
             const dy = h.speed * Math.cos(h.dir) - o.speed * Math.cos(o.dir);
             cell.sumVec2 += dx * dx + dy * dy;
@@ -295,6 +308,10 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
           if (baseObs) {
             cell.nPersist++;
             cell.sumPersistAbs += Math.abs(normalize(baseObs.dir - o.dir));
+            if (typeof o.speed === "number" && typeof baseObs.speed === "number") {
+              cell.nPersistSpeed++;
+              cell.sumPersistSpeedAbs += Math.abs(baseObs.speed - o.speed);
+            }
           }
         }
       }
@@ -336,16 +353,27 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
         buckets: cells.map((c, i) => {
           const dirMAE = c.n ? c.sumAbs / c.n : null;
           const persistMAE = c.nPersist ? c.sumPersistAbs / c.nPersist : null;
+          const dirSkill = dirMAE != null && persistMAE ? 1 - dirMAE / persistMAE : null;
+          const speedMAE = c.nSpeed ? c.sumSpeedAbs / c.nSpeed : null;
+          // M6 weighted score: 0.7 × dir_score + 0.3 × speed_score
+          // dir_score = mean(1 - |err°|/180),  speed_score = mean(1 - |err_ms|/5)
+          // Falls back to direction-only when speed data is absent.
+          const dirScore = c.n ? c.sumDirScore / c.n : null;
+          const speedScore = c.nSpeed ? c.sumSpeedScore / c.nSpeed : null;
+          const score =
+            dirScore != null && speedScore != null
+              ? 0.7 * dirScore + 0.3 * speedScore
+              : dirScore;
           return {
             id: BUCKETS[i].id,
             n: c.n,
+            score,
             dirMAE_deg: dirMAE != null ? toDeg(dirMAE) : null,
             dirBias_deg: c.n ? toDeg(c.sumSigned / c.n) : null,
-            speedMAE_ms: c.nSpeed ? c.sumSpeedAbs / c.nSpeed : null,
+            speedMAE_ms: speedMAE,
             vectorRMSE_ms: c.nSpeed ? Math.sqrt(c.sumVec2 / c.nSpeed) : null,
             persistenceMAE_deg: persistMAE != null ? toDeg(persistMAE) : null,
-            skill:
-              dirMAE != null && persistMAE ? 1 - dirMAE / persistMAE : null,
+            skill: dirSkill,
           };
         }),
       });

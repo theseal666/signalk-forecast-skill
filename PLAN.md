@@ -1,8 +1,10 @@
 # signalk-forecast-skill — Design Plan
 
-Status: **M2+M3 live** (July 2026). Archive, verification, scoreboard
-endpoint and webapp are running. M4 (SMHI/met.no adapters, SK path
-publishing, npm release) is next. See README for current state.
+Status: **M3+M5 live** (July 2026). Archive, verification, composite skill
+score (M5), scoreboard endpoint, and webapp are running. Default metric is
+the M6 weighted score (0.7 × dir + 0.3 × speed). Location picker sorts by
+distance from boat. M4 (SMHI/met.no, SK paths, npm) and M6 (spaghetti
+chart) are next. See README for current state.
 
 ## Goal
 
