@@ -148,6 +148,34 @@ main {
     transition: width 0.3s ease;
 }
 
+/* Center-zero diverging bar — used for skill vs persistence */
+.bar-track.diverging::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.bar-fill.diverging {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    transition: width 0.3s ease, left 0.3s ease;
+}
+
+.bar-fill.diverging.skill-positive {
+    border-radius: 0 3px 3px 0;
+}
+
+.bar-fill.diverging.skill-negative {
+    border-radius: 3px 0 0 3px;
+}
+
 .bar-value {
     text-align: right;
     color: #eee;

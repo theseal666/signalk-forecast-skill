@@ -8,7 +8,7 @@ const METRIC_META = {
     score:        { unit: "%", lowerBetter: false, digits: 0, scale: 100 },
     dirMAE_deg:   { unit: "°", lowerBetter: true, digits: 1 },
     dirBias_deg:  { unit: "°", lowerBetter: true, signed: true, digits: 1 },
-    skill:        { unit: "", lowerBetter: false, digits: 2 },
+    skill:        { unit: "", lowerBetter: false, digits: 2, diverging: true, halfScale: 1.0 },
     speedMAE_ms:  { unit: " m/s", lowerBetter: true, digits: 1 },
     vectorRMSE_ms: { unit: " m/s", lowerBetter: true, digits: 1 },
 };
@@ -51,8 +51,10 @@ function formatValue(v, meta) {
     return (meta.signed && display > 0 ? "+" : "") + s + meta.unit;
 }
 
-// Build one bar-line div (shared by composite panel and per-bucket chart)
-function makeBarLine(labelText, value, barWidthPct, color, valueText, note) {
+// Build one bar-line div (shared by composite panel and per-bucket chart).
+// barLeft: if non-null, renders a center-zero diverging bar with the fill
+// starting at barLeft% of the track width (50% = center).
+function makeBarLine(labelText, value, barWidthPct, color, valueText, note, barLeft) {
     const line = document.createElement("div");
     line.className = "bar-line";
 
@@ -63,8 +65,16 @@ function makeBarLine(labelText, value, barWidthPct, color, valueText, note) {
     const track = document.createElement("div");
     track.className = "bar-track";
     const fill = document.createElement("div");
-    fill.className = "bar-fill";
-    fill.style.width = Math.max(2, barWidthPct) + "%";
+    const clampedPct = Math.max(2, barWidthPct);
+    if (barLeft != null) {
+        track.classList.add("diverging");
+        fill.className = "bar-fill diverging " + (barLeft >= 50 ? "skill-positive" : "skill-negative");
+        fill.style.left = barLeft + "%";
+        fill.style.width = clampedPct + "%";
+    } else {
+        fill.className = "bar-fill";
+        fill.style.width = clampedPct + "%";
+    }
     fill.style.backgroundColor = color;
     track.appendChild(fill);
 
@@ -162,8 +172,16 @@ function render() {
             rows.forEach(r => {
                 const v = r.cell[currentMetric];
                 const mag = Math.abs(v);
-                let barPct, badness;
-                if (meta.scale != null) {
+                let barPct, badness, barLeft = null;
+                if (meta.diverging) {
+                    // Fixed scale −halfScale…+halfScale, 0 in the center.
+                    // Positive grows right from 50%, negative grows left.
+                    const halfScale = meta.halfScale || 1.0;
+                    const clamped = Math.max(-halfScale, Math.min(halfScale, v));
+                    barPct = Math.abs(clamped) / halfScale * 50;
+                    badness = 1 - Math.max(0, Math.min(1, v));
+                    barLeft = clamped >= 0 ? 50 : 50 - barPct;
+                } else if (meta.scale != null) {
                     // Absolute 0–100 % scale: bar length = actual score
                     barPct = Math.max(2, Math.min(100, v * meta.scale));
                     badness = 1 - Math.max(0, Math.min(1, v));
@@ -187,7 +205,8 @@ function render() {
                     barPct,
                     colorFor(badness),
                     formatValue(v, meta) + composite,
-                    `n=${r.cell.n}`
+                    `n=${r.cell.n}`,
+                    barLeft
                 ));
             });
         }
