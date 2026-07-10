@@ -65,15 +65,16 @@ function makeBarLine(labelText, value, barWidthPct, color, valueText, note, barL
     const track = document.createElement("div");
     track.className = "bar-track";
     const fill = document.createElement("div");
-    const clampedPct = Math.max(2, barWidthPct);
     if (barLeft != null) {
+        // barWidthPct already has the 2% minimum applied in the render loop;
+        // don't re-clamp here or near-zero negative bars overshoot the center.
         track.classList.add("diverging");
         fill.className = "bar-fill diverging " + (barLeft >= 50 ? "skill-positive" : "skill-negative");
         fill.style.left = barLeft + "%";
-        fill.style.width = clampedPct + "%";
+        fill.style.width = barWidthPct + "%";
     } else {
         fill.className = "bar-fill";
-        fill.style.width = clampedPct + "%";
+        fill.style.width = Math.max(2, barWidthPct) + "%";
     }
     fill.style.backgroundColor = color;
     track.appendChild(fill);
@@ -176,9 +177,11 @@ function render() {
                 if (meta.diverging) {
                     // Fixed scale −halfScale…+halfScale, 0 in the center.
                     // Positive grows right from 50%, negative grows left.
+                    // Apply the 2% minimum BEFORE computing barLeft so the bar
+                    // never crosses the center line for near-zero values.
                     const halfScale = meta.halfScale || 1.0;
                     const clamped = Math.max(-halfScale, Math.min(halfScale, v));
-                    barPct = Math.abs(clamped) / halfScale * 50;
+                    barPct = Math.max(2, Math.abs(clamped) / halfScale * 50);
                     badness = 1 - Math.max(0, Math.min(1, v));
                     barLeft = clamped >= 0 ? 50 : 50 - barPct;
                 } else if (meta.scale != null) {
