@@ -31,6 +31,8 @@ observations (stations) ──┘                                           + bi
 A model only earns *skill* by beating **persistence** ("the wind stays as it
 is now") — the honest baseline that separates real forecasting from noise.
 
+![Scoreboard score view — ECMWF, MET Norway, GFS, ICON scored at Hamneskar](IMG/scoreboard-score-view.png)
+
 ## How it works
 
 1. **Fetch** — every 3 h the plugin downloads the latest 8-day hourly wind
@@ -52,6 +54,8 @@ is now") — the honest baseline that separates real forecasting from noise.
    - **Per lead-time detail** — color-coded bars, green = good, red = bad.
    - **Location picker** — sorted nearest-to-boat when GPS is available,
      with distance in nautical miles.
+
+![Location picker sorted by distance from boat](IMG/station-picker-distance-sort.png)
 
 ## Metrics reference
 
@@ -247,6 +251,10 @@ Enable and configure the plugin in the SignalK admin UI under
 | Fetch interval | 3 h | How often to re-download forecasts |
 | Retention | 14 days | How long to keep archived files |
 | Verification window | 7 days | Rolling window for the scoreboard |
+
+![Plugin config — station number input and auto-discover toggle](IMG/config-station-numbers.png)
+
+![Plugin config — model list and fetch/retention settings](IMG/config-models-settings.png)
 
 ## HTTP endpoints
 
