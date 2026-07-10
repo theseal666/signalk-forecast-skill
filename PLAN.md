@@ -1,10 +1,10 @@
 # signalk-forecast-skill — Design Plan
 
-Status: **M3+M5 live** (July 2026). Archive, verification, composite skill
-score (M5), scoreboard endpoint, and webapp are running. Default metric is
-the M6 weighted score (0.7 × dir + 0.3 × speed). Location picker sorts by
-distance from boat. M4 (SMHI/met.no, SK paths, npm) and M6 (spaghetti
-chart) are next. See README for current state.
+Status: **M0–M3 + M5 done** (July 2026). Archive, verification, composite skill
+score, weighted per-bucket score, distance-sorted station picker, and webapp
+are running on KarukeraPi. Default metric is the M6 weighted score formula
+(0.7 × dir + 0.3 × speed). M4 (SMHI/met.no, SK paths, npm) and M6 (spaghetti
+chart) are next. See README for current state and metric explanations.
 
 ## Goal
 
@@ -74,20 +74,20 @@ Every adapter exposes:
 ```js
 {
   name: "open-meteo",
-  models: ["ecmwf_ifs025", "gfs_seamless", "icon_seamless", "metno_seamless", "knmi_harmonie_arome_europe"],
+  models: ["ecmwf_ifs025", "gfs_seamless", "icon_seamless", "metno_seamless"],
   // fetch one model's latest run for one position
   fetchRun(model, { latitude, longitude }) -> Promise<{
     model,            // string id
     runTime,          // ms epoch — when the model run was issued (or fetch time)
     position,         // { latitude, longitude }
-    hours: [ { t, windDir_rad, windSpeed_ms } ]   // hourly, ~48h horizon
+    hours: [ { t, windDir_rad, windSpeed_ms } ]   // hourly, ~8d horizon
   }>
 }
 ```
 
 **Open-Meteo first** and possibly only for a long time: one keyless free
 API, `&models=` parameter selects specific models, hourly
-`winddirection_10m` + `windspeed_10m`. That alone yields a 4–5 model
+`winddirection_10m` + `windspeed_10m`. That alone yields a 4–model
 comparison. SMHI open data and met.no Locationforecast come later as
 separate adapters (met.no requires a descriptive User-Agent header — note
 in adapter).
@@ -122,8 +122,11 @@ observation bucket nearest `t` (tolerance ±15 min). Each pair knows its
 Per (model, location, lead-time bucket), over a rolling window (default 7
 days), compute:
 
-- **dirMAE** — mean absolute circular error of direction (the headline
-  number, in degrees).
+- **score** — weighted composite of direction and speed accuracy on an
+  absolute 0–1 scale: `0.7 × dir_score + 0.3 × speed_score`, where
+  `dir_score = 1 − |err°| / 180` and `speed_score = 1 − |err_ms| / 5.0`.
+  Always computable; used as the default metric.
+- **dirMAE** — mean absolute circular error of direction (°).
 - **dirBias** — mean *signed* circular error. The tactical gold: "this model
   reads 10° left of reality at this station" is directly usable on the
   water even when MAE is mediocre.
@@ -139,50 +142,20 @@ Lead-time buckets: 1 h, 2 h, 3 h, 6 h, 12 h, 24 h, 2 d, 3 d, 5 d, 7 d.
 The 3–6 h bucket is the one you read at breakfast before a start;
 1–3 h buckets reveal now-casting quality.
 
-### Outputs
-
-SignalK paths (self context), per model × location:
-
-```
-environment.forecast.skill.<model>.<location>.dirError    (rad)
-environment.forecast.skill.<model>.<location>.dirBias     (rad)
-environment.forecast.skill.<model>.<location>.skill       (ratio)
-```
-
-HTTP endpoints (same style as windshift's):
-
-- `/plugins/forecast-skill/scoreboard` — full grid: models × locations ×
-  buckets with all metrics; the webapp's main course.
-- `/plugins/forecast-skill/curves?location=<id>` — recent observed series +
-  each model's forecast curve past and future, for the spaghetti chart.
-- `/plugins/forecast-skill/status` — fetch/pairing counters for debugging.
-
-### public/ — webapp
-
-Two views, same dark cockpit style as windshift's dashboard:
-
-1. **Scoreboard** — table of models × locations, colored by skill (green =
-   beats persistence comfortably, red = worse than persistence), bias shown
-   as `+8°`/`−5°` arrows, selectable lead-time bucket.
-2. **Spaghetti chart** — observed TWD (bold) with each model's curve
-   overlaid in its own color, extending into the future. Where the lines
-   have been hugging the bold one is this week's winner; where they diverge
-   tomorrow is the risk.
-
-Version-stamped assets from day one (lesson learned in windshift).
-
-## Configuration schema (sketch)
+### Configuration schema (current)
 
 ```js
 {
-  locations: [            // observation truth sources
+  vivaStationIds: [2113, 204, 2108],   // station numbers from viva.sjofartsverket.se/station/<n>
+                                        // plugin fetches name + lat/lon automatically
+  autoDiscoverViva: true,               // also picks up every station the viva plugin publishes
+  locations: [                          // manual/legacy entries — still active, kept for continuity
     {
       label: "vinga",
       latitude: 57.63, longitude: 11.60,
       dirPath: "environment.observations.viva.vinga.wind.directionTrue",
       speedPath: "environment.observations.viva.vinga.wind.averageSpeed"
-    },
-    // boat: dirPath environment.wind.directionTrue + live position
+    }
   ],
   models: ["ecmwf_ifs025", "gfs_seamless", "metno_seamless", "icon_seamless"],
   fetchIntervalHours: 3,
@@ -191,35 +164,65 @@ Version-stamped assets from day one (lesson learned in windshift).
 }
 ```
 
-Possible later sugar: an "auto-follow ViVa stations" toggle that watches
-`environment.observations.viva.*` and fills `locations` automatically (still
-just path-convention coupling, no code dependency).
+### Outputs
+
+SignalK paths (self context), per model × location — M4, not yet implemented:
+
+```
+environment.forecast.skill.<model>.<location>.dirError    (rad)
+environment.forecast.skill.<model>.<location>.dirBias     (rad)
+environment.forecast.skill.<model>.<location>.skill       (ratio)
+```
+
+HTTP endpoints:
+
+- `/plugins/forecast-skill/scoreboard` — full grid: models × locations ×
+  buckets with all metrics; the webapp's main course.
+- `/plugins/forecast-skill/stations` — ViVa station index (name, slug, lat, lon).
+- `/plugins/forecast-skill/status` — fetch/pairing counters for debugging.
+- `/plugins/forecast-skill/curves?location=<id>` — planned (M6): observed
+  series + each model's forecast curve for the spaghetti chart.
+
+### public/ — webapp (current state)
+
+Two panels, dark cockpit style:
+
+1. **Composite panel** — one bar per model ranked by composite score (0–100 %),
+   change-event accuracy over ≤ 48 h lead. Shows "not enough change events yet"
+   in steady conditions.
+2. **Per lead-time detail** — the per-bucket bar chart for the selected metric,
+   color-coded green (good) / red (bad), absolute scale for score/composite,
+   relative scale for error metrics. Sorted best-first. Composite badge always
+   visible next to each model name regardless of selected metric.
+
+Location picker is sorted nearest-to-boat when `navigation.position` is
+available (Haversine, nautical miles). Distance shown as `— X nm` per entry.
+
+Version-stamped assets (`?v=0.4.0`) — bump on every public/ change.
 
 ## Milestones
 
-- **M0 — scaffold**: plugin skeleton, config schema, data dir, empty
+- ✅ **M0 — scaffold**: plugin skeleton, config schema, data dir, empty
   endpoints. Installable, does nothing, doesn't crash.
-- **M1 — fetch & archive**: Open-Meteo adapter, scheduled fetches,
-  forecasts + observations flowing to ndjson, `/status` endpoint. Run for
-  a couple of days to accumulate material.
-- **M2 — verify**: pairing + circular stats + persistence baseline +
+- ✅ **M1 — fetch & archive**: Open-Meteo adapter, scheduled fetches,
+  forecasts + observations flowing to ndjson, `/status` endpoint.
+- ✅ **M2 — verify**: pairing + circular stats + persistence baseline +
   scoreboard endpoint. First real answer to "which model fits".
-- **M3 — webapp**: scoreboard view, then spaghetti chart.
-- **M4 — breadth**: SMHI + met.no adapters, per-bucket UI, SK path
-  publishing, npm release.
-- **M5 — composite skill score (0–100 %)**: a single headline number per
-  model that weights all data with emphasis on *detecting changes correctly
-  and on time*. See the design note below.
-- **M6 — per-timeslot spaghetti score**: for every verified forecast hour
-  show which model was closest and by how much. The aggregate composite
-  tells you the winner over 7 days; this shows the *texture* — does ECMWF
-  dominate mornings, does GFS nail frontal passages, does ICON fall apart
-  at 24h? See design note below.
-- **M7 — composite as default view**: score panel moves to the primary
-  landing view; per-bucket detail chart becomes the secondary tab.
+- ✅ **M3 — webapp**: scoreboard view, per-bucket detail chart, location picker
+  with distance-to-boat sort, absolute score scale, green/red color scheme.
+- 🔲 **M4 — breadth**: SMHI + met.no adapters, SK path publishing, npm release.
+  (Open-Meteo with 4 models, per-bucket UI, and vivaStationIds config are done.)
+- ✅ **M5 — composite skill score**: single headline number per model weighting
+  change-event detection, timing, and magnitude. See design note below.
+- 🔲 **M6 — spaghetti chart**: per-timeslot score timeline (observed TWD bold
+  + each model's curve), selectable time window, hover tooltip. The aggregate
+  composite tells you the winner over 7 days; this shows the texture.
+  The M6 weighted score formula (used as the default per-bucket metric) is
+  already implemented; the chart itself is not.
+- 🔲 **M7 — tab layout**: Score / Detail / Spaghetti tabs with URL-hash state.
   See design note below.
-- **M8 (optional, still decoupled)**: windshift's dashboard overlays
-  `/curves` output on its waterfall via HTTP — no code sharing.
+- 🔲 **M8 (optional)**: windshift's dashboard overlays `/curves` on its
+  waterfall via HTTP — no code sharing needed.
 
 ### Design note — composite skill score (M5) — IMPLEMENTED in verify.js
 
@@ -243,7 +246,7 @@ not a theoretical perfect model.
 Thresholds:
 
 | Variable | Event threshold | Scoring tolerance (→ score 0) |
-|---|---|---|
+| :--- | :--- | :--- |
 | Direction | ≥ 10° swing | ± 15° magnitude |
 | Wind speed | ≥ 1.5 m/s swing | ± 1.5 m/s magnitude |
 | Timing (both) | — | ± 3 h (score 0 at boundary, 1 at 0 h) |
@@ -251,7 +254,7 @@ Thresholds:
 Component weights (sum to 1.0 when all data present):
 
 | Component | Weight |
-|---|---|
+| :--- | :--- |
 | Direction-event timing | 0.35 |
 | Direction-event magnitude | 0.20 |
 | Speed-event timing | 0.20 |
@@ -267,256 +270,8 @@ component = recall × precision × mean_hit_score
 ```
 
 Scope: one composite per (location, model) over all ≤ 48 h lead forecast
-hours. `/scoreboard` gains a `composite` field (0–1) on each model entry.
+hours. `/scoreboard` carries a `composite` field (0–1) on each model entry.
 Display as percentage (0–100 %). Per-bucket composite is future work.
-
-### Design note — station picker UI (M4 / configuration)
-
-Goal: before a race weekend, the user picks which ViVa stations to score
-against, without editing JSON config. Different races need different stations
-— Vinga for Gothenburg races, Landsort/Björn for Stockholm, etc.
-
-**Proposed UX:**
-- A `/plugins/forecast-skill/stations` endpoint returns the full ViVa station
-  index (name, slug, lat, lon) fetched from the ViVa API (already cached in
-  `vivaLocations.js`). Response shape:
-  ```json
-  [{ "slug": "vinga", "name": "Vinga", "latitude": 57.63, "longitude": 11.60 }, ...]
-  ```
-- The webapp config panel shows a searchable dropdown/list of all ViVa
-  stations. The user picks ≤ N stations and hits Save.
-- Save POSTs to `/plugins/forecast-skill/config/locations`, which calls
-  `app.savePluginOptions()` (the same mechanism the admin UI uses), so the
-  selection survives restarts without touching files manually.
-- Lat/lon come from the ViVa index — the user never types coordinates.
-- The boat can also appear in the list (uses `environment.wind.directionTrue`
-  + live GPS position) as a special entry "Boat (GPS)".
-
-**Config schema change:** `locations` stays as-is server-side (array of
-`{label, latitude, longitude, dirPath, speedPath}`). The station-picker UI
-just builds these objects from the ViVa index and POSTs them — no schema
-migration needed.
-
-### Design note — international observation station sources (future)
-
-ViVa (Sjöfartsverket) covers Sweden well. The same observation-source
-pattern can be extended to other countries' maritime weather networks for
-racing in Finland, Norway, Denmark, etc. Each country needs two things:
-a **station index fetcher** (equivalent to `vivaLocations.js`) and a
-**live-data poller** (equivalent to what the signalk-viva plugin does for
-SignalK paths).
-
-The architecture already supports any source via configured `dirPath` /
-`speedPath`. What's missing is automatic discovery — a "pick from a list"
-UX equivalent to the ViVa station picker.
-
-#### Finland — FMI (Ilmatieteen laitos / Finnish Meteorological Institute)
-
-FMI publishes all observation data through a free, keyless WFS (OGC Web
-Feature Service) endpoint: `https://opendata.fmi.fi/wfs`
-
-Key details:
-- **Station list**: `storedquery_id=fmi::ef::stations` returns all
-  Finnish weather stations as GML/XML, including fmisid, name, lat, lon,
-  and activity status. Filter by `networkClass=itmf` or geography for
-  coastal/archipelago stations (Turku, Hanko, Åland, Helsinki seaward).
-- **Observation query**:
-  ```
-  storedquery_id=fmi::observations::weather::simple
-  &fmisid=<id>&parameters=WindSpeedMS,WindDirection,WindGust
-  &starttime=<ISO>&endtime=<ISO>&timestep=10
-  ```
-  Returns 10-minute average wind speed (m/s), direction (°, convert to
-  rad), and gust — same resolution as ViVa.
-- **Key stations for Finnish coastal sailing**: Utö (most exposed, SW
-  archipelago), Hanko, Helsinki Katajaluoto, Turku Aranda, Åland
-  (Mariehamn), Jurmo.
-- **No API key, no CORS restriction on server-side fetch.**
-- Parse: response is simple XML with `<BsWfs:ParameterName>` and
-  `<BsWfs:ParameterValue>` pairs. Straightforward to parse without
-  a heavy XML library.
-
-**Implementation plan:**
-1. `fmiLocations.js` — fetch + cache station index; expose
-   `fetchFmiStations()` → Map of `fmisid -> { name, latitude, longitude }`
-2. `providers/fmiObservations.js` — poll on a configurable interval
-   (default 10 min), fetch latest obs for active FMI stations, append to
-   the observation store under `location = fmi_<fmisid>` (prefixed to
-   avoid slug collision with ViVa).
-3. Station picker `/stations` endpoint gains `source: "fmi"` entries
-   alongside ViVa entries — same dropdown, flag shown in parentheses.
-4. Verification, composite, and scoreboard logic are unchanged — FMI
-   observations land in the same ndjson format.
-
-#### Norway — met.no (Frost API) — Skagerrak / Kattegat approach
-
-`https://frost.met.no/observations/v0.jsonld` — free API key (register
-at frost.met.no). REST/JSON. Key stations for Nordic offshore sailing:
-Utsira (open ocean reference), Lista, Oksøy, Torungen, Ferder (Oslo
-fjord entrance), Jomfruland. Relevant for Gothenburg Race Kattegat leg
-and North Sea crossings.
-
-#### Denmark — DMI — Kattegat / Øresund / Bælt / western Baltic
-
-`https://dmigw.govcloud.dk/v2/metObs/` — free API key (register at
-`dmiapi.govcloud.dk`). REST/JSON. 10-minute observation cadence.
-
-Key stations:
-- **Kattegat / approach**: Skagen (northernmost tip), Anholt (mid-
-  Kattegat reference), Læsø
-- **Øresund / Sound**: Drogden LV (narrows), Helsingør, Kastrup
-- **Great Belt / Little Belt**: Sprogø, Gedser (southernmost — gateway
-  to the Baltic)
-- **SW Baltic**: Bornholm (exposed, mid-Baltic reference)
-
-Query pattern:
-```
-GET /v2/metObs/collections/observation/items
-  ?period=latest&stationId=<id>&parameterId=wind_speed,wind_dir
-  &api-key=<key>
-```
-Returns GeoJSON; wind speed in m/s, direction in degrees (convert to
-rad). Station list available at `/v2/metObs/collections/station/items`.
-
-#### Germany — DWD (Deutscher Wetterdienst) — western / central Baltic
-
-DWD open data: **no API key required**. File-based, updated every 10 min.
-```
-https://opendata.dwd.de/weather/weather_reports/synoptic/germany/10_minutes/
-```
-JSON format (SYNOP decode) per station. Station list + metadata:
-```
-https://opendata.dwd.de/climate_environment/CDC/help/stations_list_SYNOP_KL.txt
-```
-
-Key Baltic/coastal stations:
-- **Kiel Fjord / Fehmarn**: Kiel-Holtenau, Fehmarn (Puttgarden)
-- **Western Baltic**: Warnemünde, Rostock-Warnemünde, Rügen (Arkona —
-  most exposed Baltic station in Germany), Boltenhagen
-- **Flensburg Fjord / Kattegat gate**: Flensburg, Schleswig
-
-Wind units: m/s, direction in degrees from north. DWD also publishes
-BSH-operated lightship/buoy data for Darßer Schwelle and Fehmarnbelt
-(excellent offshore references, no coast-shelter effect).
-
-**Implementation note:** DWD delivers current obs as one JSON file per
-station. Fetching ~10 relevant stations every 10 min is trivial; a
-station-list cache avoids re-fetching metadata.
-
-#### Poland — IMGW — eastern Baltic / Gulf of Gdańsk
-
-**Keyless JSON API** — no registration needed:
-```
-https://danepubliczne.imgw.pl/api/data/synop
-```
-Returns current observations for all synoptic stations as a JSON array.
-Fields: `kierunek_wiatru` (direction, degrees), `predkosc_wiatru` (speed,
-m/s). Updated hourly.
-
-Key stations (filter by id or name in the response):
-- **Hel Peninsula** (`stacja: "Hel"`) — most wind-exposed Polish station,
-  excellent mid-Baltic reference, used by Baltic offshore race fleets
-- **Gdańsk/Gdynia, Kołobrzeg, Ustka, Świnoujście** — full coast coverage
-
-Station coordinates: returned inline in each record (`godzina`,
-`stacja`, `id_stacji`, `lat`, `lon` — some records; otherwise use the
-separate `/api/data/synop/id/<id>` endpoint).
-
-#### Estonia — Ilmateenistus — Gulf of Finland / Saaremaa
-
-**Keyless XML API**, updated every 10 minutes:
-```
-https://www.ilmateenistus.ee/ilma_andmed/xml/observations.php
-```
-Returns all Estonian stations as XML. Wind speed in m/s, direction in
-degrees. Simple XML structure, no namespace complexity.
-
-Key stations for Gulf of Finland and western Estonian archipelago racing:
-- **Osmussaar** — small island, most exposed NW Estonian station,
-  open-ocean reference for Gulf of Finland approaches
-- **Vilsandi** (Saaremaa W tip) — Saaremaa race reference
-- **Sõrve** (Saaremaa S tip) — Irbe Strait gateway
-- **Pakri** (near Paldiski) — Gulf of Finland western approach
-- **Kunda, Narva-Jõesuu** — eastern Gulf of Finland
-
-**Parse note:** `<name>`, `<latitude>`, `<longitude>`, `<windspeed>`,
-`<winddirection>` fields in each `<station>` element. Latitude/longitude
-present in the XML — no separate station-index fetch needed.
-
-#### Latvia & Lithuania — lower priority, completeness
-
-- **Latvia LVĢMC**: `meteo.lv` — limited English API docs; key station
-  Kolka (Gulf of Riga entrance), Pāvilosta, Liepāja.
-- **Lithuania LHMT**: `meteo.lt` — key station Klaipėda (only Lithuanian
-  sailing port). API documentation sparse in English.
-
-Both are relevant if racing in the Gulf of Riga (Riga–Gotland) or
-eastern Baltic. Implement after higher-priority sources are stable.
-
-#### United Kingdom — Met Office
-
-Web-facing observations: `weather.metoffice.gov.uk/specialist-forecasts/coast-and-sea/observations`
-
-The underlying data is served by two APIs (both require a free registration key):
-
-**Option A — DataPoint** (older, simpler):
-```
-https://datapoint.metoffice.gov.uk/public/data/val/wxobs/all/json/all
-  ?res=hourly&key=<apikey>
-```
-Returns all UK land+coastal stations as one JSON payload. Wind speed in
-mph (multiply by 0.44704 → m/s), direction in degrees. Station metadata
-(lat, lon, name, id) returned in the same response. Most straightforward
-to implement.
-
-**Option B — Weather DataHub** (newer, recommended for new integrations):
-`https://data.hub.api.metoffice.gov.uk/` — REST/JSON, site-specific
-queries, better resolution. Requires client-ID + secret (free; OAuth2
-client-credentials flow).
-
-**Key UK coastal stations for offshore/coastal racing:**
-Lizard, Portland Bill, St. Catherine's Point, Channel Lightvessel,
-Calshot (Solent), Humber, Sandettie LV (Dover Strait), Valentia
-(Irish Sea / Fastnet), Malin Head, Round Island (Scilly).
-
-**Implementation note:** DataPoint wind speed is in mph and direction is
-in degrees from north — both need unit conversion before storage. The
-station list response includes all stations; filter to coastal by
-elevation < 50 m or by bounding box to avoid inland noise.
-
-Register at: `register.metoffice.gov.uk/myaccount/register` (DataPoint
-key issued immediately).
-
-#### General adapter contract for observation providers
-
-Each country adapter should implement:
-```js
-{
-  source: "fmi",             // prefix for location labels
-  fetchStations() -> Promise<Map<id, { name, latitude, longitude }>>
-  fetchLatest(stationIds[], since_ms) -> Promise<[{ stationId, t, dir_rad, speed_ms, gust_ms? }]>
-}
-```
-The main plugin calls `fetchLatest()` on the configured interval and
-feeds results into `addObservation()` — no other changes needed.
-
-### Design note — additional forecast model providers (future)
-
-Open-Meteo is keyless and covers 4–5 models well. Additional providers
-will be added as separate adapters in `providers/`:
-
-- **SMHI open data** — Swedish high-resolution model, keyless, good for
-  Swedish coastal waters, hourly 10 m wind. Requires descriptive User-Agent.
-- **met.no Locationforecast 2.0** — Norwegian met office, keyless, good
-  Nordic model. Requires identifying User-Agent header per their ToS.
-- **Paid/private models** — any provider that returns JSON with hourly
-  `(direction_deg, speed_ms)` can be wrapped in a one-file adapter. The
-  adapter contract is minimal (see Architecture section above). API keys go
-  in plugin config as `providers[].apiKey`, stored in SignalK plugin-config
-  and never committed.
-
-The scoreboard and composite logic are model-agnostic — adding a provider
-just means it shows up as new rows in the scoreboard table.
 
 ### Design note — per-timeslot spaghetti score (M6)
 
@@ -525,20 +280,14 @@ The per-timeslot score answers "which model was best *at 14:00 yesterday*"
 — the granularity that reveals temporal patterns: morning sea-breeze onset,
 frontal passage timing, model degradation at specific lead times.
 
-**What to show:** for each verified forecast hour `t`, compute a simple
-per-timeslot winner score for every model:
-
+**What to show:** for each verified forecast hour `t`, the timeslot score
+per model uses the same formula already implemented as the default metric:
 ```
-timeslot_score(model, t) = 1 − |dir_error_deg| / 180   (0 = worst, 1 = perfect)
-```
-
-Combined with speed error if available:
-```
-timeslot_score = 0.7 × dir_score + 0.3 × speed_score
+timeslot_score = 0.7 × (1 − |dir_err°| / 180) + 0.3 × (1 − |speed_err_ms| / 5)
 ```
 
-**Display — spaghetti-score timeline:** a time-series chart (uPlot, same
-dark style) with one line per model, Y axis = timeslot score 0–1.
+**Display — spaghetti-score timeline:** a time-series chart (uPlot, dark style)
+with one line per model, Y axis = timeslot score 0–1.
 - Each model drawn in its own color (same palette as the scoreboard)
 - Observed wind overlaid as a bold reference line (secondary Y axis,
   direction in degrees) so you can see WHY a model scored low at a
@@ -546,8 +295,8 @@ dark style) with one line per model, Y axis = timeslot score 0–1.
 - Selectable time window (last 24h / 48h / 7d)
 - Hovering a timestamp shows all models' scores + the direction errors
 
-**Backend — new `/curves` endpoint:** already planned; extend it to return
-per-hour `{ t, observed_dir, observed_speed, models: { model_id: { dir, speed, score } } }`.
+**Backend — new `/curves` endpoint:** return per-hour
+`{ t, observed_dir, observed_speed, models: { model_id: { dir, speed, score } } }`.
 The webapp builds the spaghetti chart from this; `computeScoreboard` is
 unchanged (aggregate stats still come from there).
 
@@ -555,21 +304,14 @@ unchanged (aggregate stats still come from there).
 afternoon, you know to trust it for the pre-start briefing but discard it
 for the afternoon race. No aggregate score reveals that pattern.
 
-### Design note — composite as default view (M7)
+### Design note — tab layout (M7)
 
-Currently the webapp opens on the "Direction error (°)" metric with the
-composite panel as a secondary header above it. The composite is the most
-useful single number — it should be what a sailor sees first.
-
-**Proposed layout:**
-
-Add distance in nautical miles to the station from the boat at the current time, 
-sort stations from closest to farthest.
-look at Screenshot 2026-07-09 at 22.41.01 in /IMG
+Add a three-tab structure so the composite (the most useful single number)
+is the landing view, with detail and spaghetti as secondary tabs.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Location ▾   [Score] [Detail] [Spaghetti]   7d · 10:05  │  ← tab bar
+│ Location ▾   [Score] [Detail] [Spaghetti]   7d · 10:05  │
 ├─────────────────────────────────────────────────────────┤
 │  COMPOSITE SKILL SCORE  (default landing tab)           │
 │                                                         │
@@ -577,21 +319,41 @@ look at Screenshot 2026-07-09 at 22.41.01 in /IMG
 │  MET Norway  ████████████████░░░░  65%                  │
 │  GFS         ████████░░░░░░░░░░░░  44%                  │
 │  ICON        ██████░░░░░░░░░░░░░░  38%                  │
-│                                                         │
-│  (small print: n events, window, last updated)          │
 └─────────────────────────────────────────────────────────┘
 ```
 
 - **Score tab** (default): composite ranking only, full-height, large bars.
-  Clean pre-race "which model?" answer.
-- **Detail tab**: the current per-bucket bar chart (dirMAE / bias / skill /
-  speed error), metric dropdown, all models.
+- **Detail tab**: per-bucket bar chart, metric dropdown, all models.
 - **Spaghetti tab** (M6): per-timeslot score timeline + observed wind overlay.
 
-**Implementation:** replace the current single-page layout with a
-three-tab structure. Tab state in URL hash (`#score`, `#detail`,
-`#spaghetti`) so bookmarks and back-button work. No routing library needed
-— just `hashchange` listener + show/hide divs.
+Tab state in URL hash (`#score`, `#detail`, `#spaghetti`) so bookmarks and
+back-button work. No routing library needed — just `hashchange` + show/hide.
+
+### Design note — international observation sources (future)
+
+ViVa covers Sweden well. The same observation-source pattern can be extended
+to other countries' maritime weather networks via equivalent `*Locations.js`
+adapters. Each needs a station index fetcher and a live-data poller; the
+verification logic is unchanged. Priority list:
+
+| Country | API | Key | Notes |
+| :--- | :--- | :--- | :--- |
+| Finland (FMI) | WFS opendata.fmi.fi | No | 10-min obs; XML; key stations: Utö, Hanko, Åland, Jurmo |
+| Norway (Frost) | frost.met.no | Free reg | REST/JSON; Utsira, Lista, Ferder, Jomfruland |
+| Denmark (DMI) | dmigw.govcloud.dk | Free reg | 10-min; GeoJSON; Skagen, Anholt, Drogden, Bornholm |
+| Germany (DWD) | opendata.dwd.de | No | File-based; Arkona, Fehmarn, Warnemünde |
+| Poland (IMGW) | danepubliczne.imgw.pl | No | Hourly JSON array; Hel Peninsula is the key station |
+| Estonia | ilmateenistus.ee | No | XML; Osmussaar, Vilsandi, Sõrve |
+| UK (Met Office) | DataPoint or DataHub | Free reg | DataPoint simplest; speed in mph (×0.44704) |
+
+General adapter contract:
+```js
+{
+  source: "fmi",
+  fetchStations() -> Promise<Map<id, { name, latitude, longitude }>>
+  fetchLatest(stationIds[], since_ms) -> Promise<[{ stationId, t, dir_rad, speed_ms }]>
+}
+```
 
 ## Risks & notes
 
@@ -603,8 +365,11 @@ three-tab structure. Tab state in URL hash (`#score`, `#detail`,
   bias per station absorbs most of it, which is exactly why we score per
   location instead of globally.
 - **Verification needs patience**: skill numbers mean little until a few
-  days of pairs exist. The scoreboard should show sample counts and refuse
-  to color-code below a minimum n.
+  days of pairs exist. The scoreboard shows sample counts (`n=`); do not
+  act on n < 10.
+- **ViVa station ID field name**: `vivaLocations.js` uses `s.ID ?? s.StationID`
+  defensively. If station IDs fail to resolve, curl
+  `https://services.viva.sjofartsverket.se:8080/output/vivaoutputservice.svc/vivastation/`
+  and check the actual field name in the response.
 - **Clock discipline**: everything in ms epoch UTC internally; the Pi runs
   NTP, forecasts come with UTC timestamps — display-local only in the webapp.
-```
