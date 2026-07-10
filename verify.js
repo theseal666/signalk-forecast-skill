@@ -18,6 +18,9 @@ function circularMeanFromSums(sumSin, sumCos) {
 // Lead-time buckets: a pair lands in the first bucket whose upper bound
 // (hours between model run and valid time) it fits under
 const BUCKETS = [
+  { id: "1h", maxHours: 1 },
+  { id: "2h", maxHours: 2 },
+  { id: "3h", maxHours: 3 },
   { id: "6h", maxHours: 6 },
   { id: "12h", maxHours: 12 },
   { id: "24h", maxHours: 24 },

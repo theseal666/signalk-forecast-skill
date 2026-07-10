@@ -62,8 +62,8 @@ is now") — the honest baseline that separates real forecasting from noise.
 
 4. **Display** — built-in webapp shows:
    - **Composite panel** — one bar per model, ranked by overall composite score (0–100 %).
-   - **Per lead-time detail** — color-coded bars per bucket (6 h / 12 h / 24 h /
-     2 d / 3 d / 5 d / 7 d), defaulting to the weighted score metric.
+   - **Per lead-time detail** — color-coded bars per bucket (1 h / 2 h / 3 h /
+     6 h / 12 h / 24 h / 2 d / 3 d / 5 d / 7 d), defaulting to the weighted score metric.
    - **Location picker** — stations sorted by distance from the boat (nearest first)
      when GPS position is available, with distance shown in nautical miles.
 

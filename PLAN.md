@@ -135,8 +135,9 @@ days), compute:
   the model beats a sailor with a wind vane and a stopwatch; negative =
   it doesn't. This keeps the scoreboard honest.
 
-Lead-time buckets: 0–6 h, 6–12 h, 12–24 h, 24–48 h. The 6–12 h bucket is
-the one you read at breakfast before a start.
+Lead-time buckets: 1 h, 2 h, 3 h, 6 h, 12 h, 24 h, 2 d, 3 d, 5 d, 7 d.
+The 3–6 h bucket is the one you read at breakfast before a start;
+1–3 h buckets reveal now-casting quality.
 
 ### Outputs
 
