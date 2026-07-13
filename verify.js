@@ -99,6 +99,30 @@ function zigzagEvents(pts, threshold) {
   return events;
 }
 
+// Collapse a point series into hourly bins (circular-mean direction, mean
+// speed) so change-event detection sees tactically real shifts, not the
+// minute-scale sensor noise a weather model can never resolve. Forecasts are
+// already hourly; smoothing the observations puts both on the same footing.
+// pts: [{t, dir (rad), speed?}] sorted by t  ->  [{t, dir, speed}] sorted by t
+function smoothHourly(pts) {
+  const bins = new Map();
+  for (const p of pts) {
+    const h = Math.floor(p.t / 3600000) * 3600000;
+    if (!bins.has(h)) bins.set(h, { t: h, sumSin: 0, sumCos: 0, sumSpeed: 0, nSpeed: 0 });
+    const b = bins.get(h);
+    b.sumSin += Math.sin(p.dir);
+    b.sumCos += Math.cos(p.dir);
+    if (typeof p.speed === "number") { b.sumSpeed += p.speed; b.nSpeed++; }
+  }
+  return [...bins.values()]
+    .sort((a, b) => a.t - b.t)
+    .map((b) => ({
+      t: b.t,
+      dir: Math.atan2(b.sumSin, b.sumCos),
+      speed: b.nSpeed > 0 ? b.sumSpeed / b.nSpeed : null,
+    }));
+}
+
 // Match each observed event to the nearest forecast event within toleranceMs
 // (greedy, shortest-distance-first). Returns { hits, misses, falseAlarms }.
 function matchEvents(obsEvents, fcstEvents, toleranceMs) {
@@ -132,63 +156,75 @@ const SCORE_SPEED_SCALE_MS = 5.0;
 // Composite score constants — calibrated for racing use.
 // Tolerances define "perfect": a hit within ±3h timing and ±15° direction
 // scores 1.0 on those components. At the tolerance boundary the score is 0.
-const COMPOSITE_DIR_THRESHOLD_RAD = (10 * Math.PI) / 180; // ≥10° swing confirms dir event
-const COMPOSITE_SPD_THRESHOLD_MS = 1.5;                   // ≥1.5 m/s swing confirms spd event
+const COMPOSITE_DIR_THRESHOLD_RAD = (20 * Math.PI) / 180; // ≥20° swing confirms a tactically real dir shift
+const COMPOSITE_SPD_THRESHOLD_MS = 2.0;                   // ≥2.0 m/s swing confirms spd event
 const COMPOSITE_TIMING_TOL_MS = 3 * 3600 * 1000;          // ±3h matching window + timing score
 const COMPOSITE_DIR_TOL_DEG = 15;                         // ±15° magnitude tolerance
 const COMPOSITE_SPD_TOL_MS = 1.5;                         // ±1.5 m/s magnitude tolerance
 const COMPOSITE_MIN_OBS_EVENTS = 2;                       // refuse to score with < 2 observed events
 const COMPOSITE_MAX_LEAD_MS = 48 * 3600 * 1000;           // only score forecasts ≤ 48h lead
 
-// Composite score (0–1) for one (location, model) pair over the verification window.
+// Composite score for one (location, model) pair over the verification window.
 //
-// Component weights (sum to 1 when both dir and speed data are present):
+// "How reliably does this model catch the wind shifts that actually happen,
+// at the right time and size?" Per quality dimension the component is
+//   component = F1(recall, precision) × mean_hit_quality
+// where F1 is the harmonic mean of recall and precision. F1 penalises both
+// missed shifts and false alarms, but — unlike the old recall×precision
+// product — does not collapse toward zero, so scores spread across 0–1 and
+// rank models meaningfully.
+//
+// Component weights (renormalised over whatever data is present):
 //   0.35 — direction-event timing
 //   0.20 — direction-event magnitude
 //   0.20 — speed-event timing
 //   0.15 — speed-event magnitude
-//   0.10 — baro (reserved; not yet implemented)
 //
-// If speed data is absent the speed weights are redistributed to direction.
-// Result is null when there are not enough events to make a meaningful score.
+// Returns an object:
+//   { score, recall, precision, hits, obsEvents }
+// where recall/hits/obsEvents describe the DIRECTION shifts (used for the
+// plain-language "catches N of M shifts" summary). score is null when there
+// are not enough observed events to judge.
 //
 // obsPts: [{t, dir (rad), speed? (m/s)}] sorted by t
 // fcstPts: [{t, dir (rad), speed? (m/s)}] — ≤48h lead, deduped by valid time (latest run wins)
 function computeComposite(obsPts, fcstPts) {
-  if (obsPts.length < 5 || fcstPts.length < 5) return null;
+  const NONE = { score: null, recall: null, precision: null, hits: 0, obsEvents: 0 };
+  if (obsPts.length < 5 || fcstPts.length < 5) return NONE;
 
-  const obsDir = unwrapDir(obsPts.map((p) => ({ t: p.t, v: p.dir })));
+  // Smooth observations to hourly so we score real shifts, not sensor noise.
+  const obsPtsH = smoothHourly(obsPts);
+
+  const obsDir = unwrapDir(obsPtsH.map((p) => ({ t: p.t, v: p.dir })));
   const fcstDir = unwrapDir(fcstPts.map((p) => ({ t: p.t, v: p.dir })));
   const obsEvents = zigzagEvents(obsDir, COMPOSITE_DIR_THRESHOLD_RAD);
   const fcstEvents = zigzagEvents(fcstDir, COMPOSITE_DIR_THRESHOLD_RAD);
 
-  const obsSpd = obsPts.filter((p) => p.speed != null).map((p) => ({ t: p.t, v: p.speed }));
+  const obsSpd = obsPtsH.filter((p) => p.speed != null).map((p) => ({ t: p.t, v: p.speed }));
   const fcstSpd = fcstPts.filter((p) => p.speed != null).map((p) => ({ t: p.t, v: p.speed }));
   const obsSpdEvents = zigzagEvents(obsSpd, COMPOSITE_SPD_THRESHOLD_MS);
   const fcstSpdEvents = zigzagEvents(fcstSpd, COMPOSITE_SPD_THRESHOLD_MS);
 
   const hasDirEvents = obsEvents.length >= COMPOSITE_MIN_OBS_EVENTS;
   const hasSpdEvents = obsSpdEvents.length >= COMPOSITE_MIN_OBS_EVENTS;
-  if (!hasDirEvents && !hasSpdEvents) return null;
+  if (!hasDirEvents && !hasSpdEvents) return NONE;
 
   let totalWeight = 0;
   let totalScore = 0;
 
-  // Accumulate one component: weight × recall × precision × mean-hit-score.
-  // Separating timing and magnitude scoring over the same hit set correctly
-  // attributes independent F1 penalties for each quality dimension.
-  function applyComponent(hits, misses, falseAlarms, weight, scoreFn) {
-    const nObs = hits.length + misses.length;
-    const nFcst = hits.length + falseAlarms.length;
-    const recall = nObs > 0 ? hits.length / nObs : 0;
-    const precision = nFcst > 0 ? hits.length / nFcst : 0;
+  // One component: weight × F1(recall, precision) × mean-hit-score.
+  function applyComponent(recall, precision, hits, weight, scoreFn) {
+    const f1 = recall + precision > 0 ? (2 * recall * precision) / (recall + precision) : 0;
     const meanHit =
-      hits.length > 0
-        ? hits.reduce((s, h) => s + scoreFn(h), 0) / hits.length
-        : 0;
-    totalScore += weight * recall * precision * meanHit;
+      hits.length > 0 ? hits.reduce((s, h) => s + scoreFn(h), 0) / hits.length : 0;
+    totalScore += weight * f1 * meanHit;
     totalWeight += weight;
   }
+
+  let dirRecall = null;
+  let dirPrecision = null;
+  let dirHits = 0;
+  let dirObs = 0;
 
   if (hasDirEvents) {
     const { hits, misses, falseAlarms } = matchEvents(
@@ -196,12 +232,20 @@ function computeComposite(obsPts, fcstPts) {
       fcstEvents,
       COMPOSITE_TIMING_TOL_MS
     );
+    const nObs = hits.length + misses.length;
+    const nFcst = hits.length + falseAlarms.length;
+    const recall = nObs > 0 ? hits.length / nObs : 0;
+    const precision = nFcst > 0 ? hits.length / nFcst : 0;
+    dirRecall = recall;
+    dirPrecision = precision;
+    dirHits = hits.length;
+    dirObs = nObs;
     // Timing: 0 at boundary (3h), 1 at perfect (0h)
-    applyComponent(hits, misses, falseAlarms, 0.35, (h) =>
+    applyComponent(recall, precision, hits, 0.35, (h) =>
       Math.max(0, 1 - Math.abs(h.fcst.t - h.obs.t) / COMPOSITE_TIMING_TOL_MS)
     );
     // Magnitude: 0 at boundary (15°), 1 at perfect (0°)
-    applyComponent(hits, misses, falseAlarms, 0.20, (h) =>
+    applyComponent(recall, precision, hits, 0.20, (h) =>
       Math.max(
         0,
         1 - ((Math.abs(h.fcst.v - h.obs.v) * 180) / Math.PI) / COMPOSITE_DIR_TOL_DEG
@@ -215,15 +259,20 @@ function computeComposite(obsPts, fcstPts) {
       fcstSpdEvents,
       COMPOSITE_TIMING_TOL_MS
     );
-    applyComponent(hits, misses, falseAlarms, 0.20, (h) =>
+    const nObs = hits.length + misses.length;
+    const nFcst = hits.length + falseAlarms.length;
+    const recall = nObs > 0 ? hits.length / nObs : 0;
+    const precision = nFcst > 0 ? hits.length / nFcst : 0;
+    applyComponent(recall, precision, hits, 0.20, (h) =>
       Math.max(0, 1 - Math.abs(h.fcst.t - h.obs.t) / COMPOSITE_TIMING_TOL_MS)
     );
-    applyComponent(hits, misses, falseAlarms, 0.15, (h) =>
+    applyComponent(recall, precision, hits, 0.15, (h) =>
       Math.max(0, 1 - Math.abs(h.fcst.v - h.obs.v) / COMPOSITE_SPD_TOL_MS)
     );
   }
 
-  return totalWeight > 0 ? totalScore / totalWeight : null;
+  const score = totalWeight > 0 ? totalScore / totalWeight : null;
+  return { score, recall: dirRecall, precision: dirPrecision, hits: dirHits, obsEvents: dirObs };
 }
 
 // Cheap stable fingerprint of a forecast's hourly payload. Two fetches whose
@@ -276,7 +325,7 @@ function reduceCell(pairMap) {
     n++;
     sumAbs += Math.abs(dErr);
     sumSigned += dErr;
-    sumDirScore += Math.max(0, 1 - dErrDeg / 180);
+    sumDirScore += Math.max(0, 1 - dErrDeg / 90);
     if (p.fSpeed != null && typeof p.o.speed === "number") {
       const sErr = Math.abs(p.fSpeed - p.o.speed);
       nSpeed++;
@@ -464,6 +513,7 @@ module.exports = {
   unwrapDir,
   zigzagEvents,
   matchEvents,
+  smoothHourly,
   computeComposite,
   fingerprintHours,
   attributeRunTimes,

@@ -1,10 +1,28 @@
 # signalk-forecast-skill — Design Plan
 
-Status: **M0–M3 + M5 done** (July 2026). Archive, verification, composite skill
-score, weighted per-bucket score, distance-sorted station picker, and webapp
-are running on KarukeraPi. Default metric is the M6 weighted score formula
-(0.7 × dir + 0.3 × speed). M4 (SMHI/met.no, SK paths, npm) and M6 (spaghetti
-chart) are next. See README for current state and metric explanations.
+Status: **M0–M3 + M5 done, metrics recalibrated + webapp reworked** (July 2026).
+Archive, verification, distance-sorted station picker, and webapp run on
+KarukeraPi.
+
+**2026-07 recalibration + question-driven webapp (v0.6):** after ~1 week of
+live data the two headline metrics couldn't separate models (Score compressed to
+75–90 %; Composite pinned to 1–13 %) and forecast runs were mis-attributed /
+double-counted. Fixed in `verify.js`:
+- **Run attribution + dedup** — identical re-served fetches collapse to their
+  first-seen run; one verification per (bucket, valid-time). `n` is now honest
+  (a 2-day bucket dropped from ~56 k to ~3 k), `nRaw` kept for reference.
+- **Score rescaled** `1 − err/90` (0 = random guess, 100 = perfect) → spreads
+  52–86 % and separates models.
+- **Composite** now `F1(recall, precision) × mean_hit` over **hourly-smoothed**
+  obs with a **≥20°** shift threshold → meaningful "catches N of M shifts";
+  returns `{score, recall, precision, hits, obsEvents}`.
+- **Webapp** rebuilt around three sailor questions: recommendation card, best-
+  match ranking with plain-language + tooltips, and best-model-by-horizon strip;
+  per-lead-time metric chart moved into a collapsible Advanced panel.
+
+Next: **M4** (SMHI/met.no adapters, SK path publishing, npm) and **M6**
+(per-timeslot spaghetti chart — the intraday "switch during the race" view).
+See README for current metric explanations.
 
 ## Goal
 

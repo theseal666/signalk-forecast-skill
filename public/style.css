@@ -212,3 +212,197 @@ main {
     font-size: 0.85rem;
     padding: 4px 0;
 }
+
+/* ---------- Q2: recommendation card ---------- */
+#reco {
+    margin-bottom: 26px;
+}
+
+.reco-card {
+    background: linear-gradient(135deg, #14251f, #101a16);
+    border: 1px solid #2f6b57;
+    border-left: 4px solid #2fd1b0;
+    border-radius: 10px;
+    padding: 16px 20px;
+}
+
+.reco-card.waiting {
+    color: #9aa;
+    border-color: #333;
+    border-left-color: #555;
+    background: #161616;
+}
+
+.reco-eyebrow {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6fbfa6;
+}
+
+.reco-pick {
+    font-size: 1.7rem;
+    font-weight: bold;
+    color: #eafaf5;
+    margin: 2px 0 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.reco-score {
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.reco-why {
+    font-size: 0.92rem;
+    color: #cfe3dc;
+    line-height: 1.5;
+}
+
+/* ---------- Q1: ranking cards ---------- */
+#ranking {
+    margin-bottom: 28px;
+}
+
+.rank-card {
+    display: grid;
+    grid-template-columns: 34px 1fr 74px;
+    align-items: center;
+    gap: 14px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+}
+
+.rank-card.top {
+    border-color: #2f6b57;
+    background: #172019;
+}
+
+.rank-pos {
+    font-size: 1.3rem;
+    font-weight: bold;
+    color: #666;
+    text-align: center;
+}
+
+.rank-card.top .rank-pos {
+    color: #2fd1b0;
+}
+
+.rank-name {
+    font-weight: bold;
+    font-size: 1.02rem;
+    color: #e8e8e8;
+    margin-bottom: 3px;
+}
+
+.rank-summary {
+    font-size: 0.85rem;
+    color: #9fb0aa;
+    line-height: 1.45;
+}
+
+.rank-summary span {
+    border-bottom: 1px dotted #4a5a54;
+    cursor: help;
+}
+
+.rank-bar {
+    margin-top: 8px;
+    height: 6px;
+    background: #262626;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.rank-fill {
+    height: 100%;
+    border-radius: 3px;
+}
+
+.rank-score {
+    font-size: 1.7rem;
+    font-weight: bold;
+    color: #eee;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.rank-score span {
+    font-size: 0.9rem;
+    color: #888;
+}
+
+/* ---------- Q3: horizon strip ---------- */
+#horizon {
+    margin-bottom: 28px;
+}
+
+.horizon-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.horizon-chip {
+    flex: 1;
+    min-width: 130px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+.hz-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #777;
+    margin-bottom: 4px;
+}
+
+.hz-pick {
+    font-size: 1.05rem;
+    color: #e0e0e0;
+}
+
+.hz-score {
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.horizon-verdict {
+    margin-top: 12px;
+    font-size: 0.9rem;
+    color: #cfe3dc;
+    padding: 8px 2px;
+}
+
+/* ---------- collapsible detail ---------- */
+#detail-panel {
+    margin-top: 10px;
+    border-top: 1px solid #262626;
+    padding-top: 12px;
+}
+
+#detail-panel summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7a8f88;
+    padding: 6px 0;
+}
+
+#detail-panel summary:hover {
+    color: #aac4bc;
+}
+
+.detail-body {
+    padding-top: 16px;
+}

@@ -4,48 +4,61 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Forecast Skill</title>
-    <link rel="stylesheet" href="style.css?v=0.5.0">
+    <link rel="stylesheet" href="style.css?v=0.6.0">
 </head>
 <body>
     <div id="dashboard">
         <header>
             <div class="brand">
-                <img src="icon.png?v=0.5.0" alt="Forecast Skill">
+                <img src="icon.png?v=0.6.0" alt="Forecast Skill">
                 <span>FORECAST&nbsp;SKILL</span>
             </div>
             <div class="control">
-                <label>Location</label>
+                <label>Station</label>
                 <select id="location-select"></select>
-            </div>
-            <div class="control">
-                <label>Metric</label>
-                <select id="metric-select">
-                    <option value="score">Score (dir 70% + speed 30%)</option>
-                    <option value="skill">Dir skill vs persistence</option>
-                    <option value="dirMAE_deg">Direction error (°)</option>
-                    <option value="dirBias_deg">Direction bias (°)</option>
-                    <option value="speedMAE_ms">Speed error (m/s)</option>
-                    <option value="vectorRMSE_ms">Vector RMSE (m/s)</option>
-                </select>
             </div>
             <div class="control legend" id="window-info"></div>
         </header>
         <main>
-            <div id="composite-panel">
-                <div class="section-title">
-                    Composite skill score
-                    <span class="section-note"> — change-event accuracy, ≤ 48 h lead, 0–100 %</span>
+            <!-- Q2: what should I choose -->
+            <section id="reco"></section>
+
+            <!-- Q1: what has been the best match here -->
+            <div class="section-title">
+                Best match this week
+                <span class="section-note">— ranked by how close each model has been. Hover any figure for what it means.</span>
+            </div>
+            <div id="ranking"></div>
+
+            <!-- Q3: reason to switch during / before a race -->
+            <div class="section-title">
+                Does the pick change by forecast horizon?
+                <span class="section-note">— who is best now vs. later. If it flips, that is your reason to switch.</span>
+            </div>
+            <div id="horizon"></div>
+
+            <!-- power-user detail -->
+            <details id="detail-panel">
+                <summary>Advanced — per lead-time detail</summary>
+                <div class="detail-body">
+                    <div class="control">
+                        <label>Metric</label>
+                        <select id="metric-select">
+                            <option value="score">Match score (0–100)</option>
+                            <option value="skill">Skill vs “no change”</option>
+                            <option value="dirMAE_deg">Direction error (°)</option>
+                            <option value="dirBias_deg">Direction bias (°)</option>
+                            <option value="speedMAE_ms">Speed error (m/s)</option>
+                            <option value="vectorRMSE_ms">Vector RMSE (m/s)</option>
+                        </select>
+                        <span class="section-note" id="metric-label"></span>
+                    </div>
+                    <p id="hint"></p>
+                    <div id="chart"></div>
                 </div>
-                <div id="composite-bars"></div>
-            </div>
-            <div class="section-title bucket-section-title">
-                Per lead-time detail
-                <span class="section-note" id="metric-label"></span>
-            </div>
-            <p id="hint"></p>
-            <div id="chart"></div>
+            </details>
         </main>
     </div>
-    <script src="app.js?v=0.5.0"></script>
+    <script src="app.js?v=0.6.0"></script>
 </body>
 </html>

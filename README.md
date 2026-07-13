@@ -53,11 +53,16 @@ is now") — the honest baseline that separates real forecasting from noise.
    Pairs are grouped into **lead-time buckets**: 1 h / 2 h / 3 h / 6 h /
    12 h / 24 h / 2 d / 3 d / 5 d / 7 d.
 
-4. **Display** — built-in webapp at `/plugins/forecast-skill/` shows:
-   - **Composite panel** — one bar per model, ranked 0–100 %.
-   - **Per lead-time detail** — color-coded bars, green = good, red = bad.
-   - **Location picker** — sorted nearest-to-boat when GPS is available,
-     with distance in nautical miles.
+4. **Display** — built-in webapp at `/plugins/forecast-skill/`, built to answer
+   three questions directly:
+   - **Which should I choose?** — a recommendation card per station, with the
+     bias correction to apply.
+   - **What's been the best match?** — models ranked, each with a plain-language
+     line ("≈24° off · reads +8° · catches 9/17 shifts · beats 'no change' from 6h").
+   - **Reason to switch mid-race?** — best model by horizon (now / morning /
+     day-before); if it flips, that's your signal.
+   - **Advanced** (collapsible) — the full per lead-time metric chart.
+   - **Station picker** — sorted nearest-to-boat when GPS is available.
 
 ![Location picker sorted by distance from boat](IMG/station-picker-distance-sort.png)
 
@@ -87,24 +92,22 @@ The primary metric. A weighted combination of direction accuracy and speed accur
 ```
 score = 0.7 × dir_score + 0.3 × speed_score
 
-dir_score   = max(0,  1 − |direction_error°| / 180 )
-speed_score = max(0,  1 − |speed_error m/s| / 5.0  )
+dir_score   = max(0,  1 − |direction_error°| / 90 )
+speed_score = max(0,  1 − |speed_error m/s| / 5.0 )
 ```
 
-The direction component saturates to 0 at 180° error; the speed component saturates at 5 m/s error. Neither can go negative.
+The direction scale is anchored so that **100 % = a perfect forecast and 0 % = no better than a random guess** — 90° is the average error of random directions. A 30° error scores 67 %, a 45° error scores 50 %. This deliberately spreads real-world performance (typically 25–40° error) across the usable range, so models can actually be told apart. (Earlier versions divided by 180°, which compressed every model into the 75–90 % band.)
 
 **How to read it:**
 
 | Score | What it means |
 | :--- | :--- |
-| 90–100 % | Excellent — roughly ≤ 18° direction error and ≤ 0.5 m/s speed error |
-| 75–90 %  | Good — reliable tactical input |
-| 60–75 %  | Fair — usable with caution; check dirBias for a correction value |
-| < 60 %   | Poor — do not rely on this model at this lead time |
+| 80–100 % | Excellent — ≤ ~18° direction error |
+| 65–80 %  | Good — reliable tactical input |
+| 50–65 %  | Fair — usable with caution; check the bias |
+| < 50 %   | Poor — barely better than guessing |
 
-The 70 / 30 weight reflects sailing priorities: being off by 20° on a layline costs more than being off by 1 m/s on speed. The 5 m/s speed scale is intentionally forgiving — a 5 m/s miss is a full Beaufort step error; normal forecast spread is well within that.
-
-Because the scale is absolute, you can compare scores across locations and lead times directly: an 82 % at 24 h lead means the same thing at Vinga and at Svenska Högarna.
+The 70 / 30 weight reflects sailing priorities: being off by 20° on a layline costs more than being off by 1 m/s on speed. The 5 m/s speed scale is intentionally forgiving — a 5 m/s miss is a full Beaufort step error.
 
 ---
 
@@ -205,31 +208,23 @@ A single headline number per model that focuses on *change events* rather than a
 
 **How it works:**
 
-The algorithm detects wind-shift events in the observation record (zigzag analysis: ≥ 10° direction swing or ≥ 1.5 m/s speed swing within a sliding window). For each observed event, it asks: did the model predict it? How close in timing? How accurate in magnitude?
+Observations are first **smoothed to hourly** (circular mean), so event detection sees tactically real shifts — not the minute-scale sensor noise a weather model can never resolve. The algorithm then finds wind-shift events (zigzag analysis: **≥ 20° direction swing** or **≥ 2.0 m/s speed swing**). For each observed shift it asks: did the model predict it, at the right time, with the right magnitude?
 
 | Event property | Threshold | Scoring scale |
 | :--- | :--- | :--- |
-| Direction swing threshold | ≥ 10° | — |
-| Speed swing threshold | ≥ 1.5 m/s | — |
+| Direction swing threshold | ≥ 20° | — |
+| Speed swing threshold | ≥ 2.0 m/s | — |
 | Timing error | — | 0 = ±3 h off, 1 = exact |
 | Direction magnitude error | — | 0 = ±15° off, 1 = exact |
 | Speed magnitude error | — | 0 = ±1.5 m/s off, 1 = exact |
 
-Component weights:
-
-| Component | Weight |
-| :--- | :--- |
-| Direction-event timing | 35 % |
-| Direction-event magnitude | 20 % |
-| Speed-event timing | 20 % |
-| Speed-event magnitude | 15 % |
-| Baro trend | 10 % (reserved — not scored until pressure path is configured) |
-
-Each component score = `recall × precision × mean_hit_quality`. The composite is the weighted sum over all components with data.
+Each component score = `F1(recall, precision) × mean_hit_quality`, weighted 35 % dir-timing / 20 % dir-magnitude / 20 % speed-timing / 15 % speed-magnitude. **F1 (harmonic mean of recall and precision)** replaced an earlier `recall × precision` *product* that collapsed every model toward 0 %; F1 penalises both missed shifts and false alarms without pinning the score to zero.
 
 Only ≤ 48 h lead-time forecast hours are used (event prediction beyond 48 h is speculative).
 
-**What to watch:** the composite needs a few days of actual wind-shift events to produce meaningful numbers. In steady high-pressure conditions it will show "not enough change events yet". That is correct — when nothing changes, there is nothing to score event detection against.
+**In the webapp** the blended percentage is deliberately not shown as the headline — instead each model reports the plain, interpretable **"catches N of M shifts."** The raw counts are what a tactician actually wants.
+
+**What to watch:** the composite needs a few days of actual wind-shift events to mean anything. In steady high pressure it will show few shifts to judge — correct, since there is nothing to score against.
 
 ---
 
@@ -272,10 +267,11 @@ Served under `/plugins/forecast-skill/`.
 
 ## Tips for reading the results
 
-**Sample count is the first thing to check.** The webapp shows `n=` next to
-every bar. `n < 10` pairs is not enough to trust any metric. Give it 2–3
-days per lead-time bucket. The 1 h bucket fills fastest; the 7 d bucket
-needs a full week.
+**Sample count is the first thing to check.** The Advanced panel shows `n=` next
+to every bar. As of v0.6 this is a **deduplicated** count — one verification per
+valid time (the provider re-serves the same run across many fetches; those are
+collapsed), so `n` is an honest independent-ish sample, not an inflated one.
+`n < 10` is still not enough to trust a metric; give it 2–3 days per bucket.
 
 **Score vs skill measure different things.** Score is absolute accuracy
 (75 % = roughly 27° off and 1.5 m/s off). Skill compares against the

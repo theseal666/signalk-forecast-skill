@@ -6,6 +6,8 @@ const {
   fingerprintHours,
   attributeRunTimes,
   computeScoreboard,
+  smoothHourly,
+  computeComposite,
 } = require("../verify.js");
 
 const HOUR = 3600 * 1000;
@@ -97,4 +99,46 @@ test("dedup keeps the freshest run whose lead lands in the same bucket", () => {
   assert.strictEqual(cell.n, 1, "single verification for this valid time+bucket");
   assert.strictEqual(cell.nRaw, 2, "both runs seen before dedup");
   assert.ok(Math.abs(cell.dirMAE_deg - 60) < 1e-6, "freshest (run2) wins -> 60° error");
+});
+
+test("smoothHourly bins to the hour with a circular mean direction", () => {
+  const H = 3600 * 1000;
+  const base = 10 * H; // an exact hour boundary
+  // three samples in the same hour straddling north (350°, 10°, 0°) -> mean ~0°
+  const pts = [
+    { t: base + 1, dir: deg(350), speed: 4 },
+    { t: base + 2, dir: deg(10), speed: 6 },
+    { t: base + 3, dir: deg(0), speed: 5 },
+    { t: base + H + 1, dir: deg(90), speed: 8 }, // next hour
+  ];
+  const out = smoothHourly(pts);
+  assert.strictEqual(out.length, 2, "two hourly bins");
+  const meanDeg = ((out[0].dir * 180) / Math.PI + 360) % 360;
+  assert.ok(meanDeg < 2 || meanDeg > 358, "circular mean near 0°, not ~120°");
+  assert.ok(Math.abs(out[0].speed - 5) < 1e-9, "mean speed of first bin");
+  assert.ok(out[0].t % H === 0, "bin timestamp on the hour");
+});
+
+test("computeComposite returns a shift-catch object; empty input is well-formed", () => {
+  const empty = computeComposite([], []);
+  assert.strictEqual(empty.score, null);
+  assert.strictEqual(empty.hits, 0);
+  assert.strictEqual(empty.obsEvents, 0);
+
+  // A model that perfectly reproduces the observed series should score > 0 and
+  // catch every observed shift (recall = 1).
+  const H = 3600 * 1000;
+  const t0 = 1_000_000_000_000;
+  const pts = [];
+  for (let i = 0; i < 40; i++) {
+    // a slow triangle wave that crosses the 20° threshold several times
+    const phase = Math.sin(i / 3) * deg(35);
+    pts.push({ t: t0 + i * H, dir: phase < 0 ? phase + 2 * Math.PI : phase, speed: 5 });
+  }
+  const obs = pts.map((p) => ({ ...p }));
+  const fcst = pts.map((p) => ({ ...p }));
+  const c = computeComposite(obs, fcst);
+  assert.ok(c.obsEvents >= 2, "detected real shifts");
+  assert.strictEqual(c.hits, c.obsEvents, "perfect forecast catches them all");
+  assert.ok(c.score > 0.5, "perfect forecast scores well above zero");
 });
