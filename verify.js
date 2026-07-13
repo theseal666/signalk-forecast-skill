@@ -226,11 +226,87 @@ function computeComposite(obsPts, fcstPts) {
   return totalWeight > 0 ? totalScore / totalWeight : null;
 }
 
+// Cheap stable fingerprint of a forecast's hourly payload. Two fetches whose
+// hours are identical are the *same* model run re-served by the provider.
+function fingerprintHours(hours) {
+  let s = "";
+  for (const h of hours) s += h.t + ":" + h.dir + ":" + h.speed + ";";
+  return s;
+}
+
+// Attribute every fetched run to the true model run that produced it.
+//
+// Open-Meteo does not report model init time and re-serves the same run across
+// several fetches (measured on real data: ~2.9× on average, up to 7× for
+// ECMWF). Left uncorrected, one run is treated as many, each stamped with a
+// different fetch time — so a single forecast for a given valid time is scored
+// at several different (fake) lead times. Here we detect identical re-serves
+// per (model, location) and rewrite each run's effective run time to the
+// *first* fetch at which that exact content appeared. That first-seen time is
+// the best available proxy for init time and the correct origin for lead time.
+//
+// Note: first-seen still lags true init by the provider's publish latency
+// (larger for ECMWF than for MET Norway); recovering absolute init would need a
+// provider that reports it or a per-model schedule table. What this fixes is
+// the dominant error — the same run being counted at many phantom lead times.
+//
+// Returns the records sorted by fetch time, each carrying `_runTime`.
+function attributeRunTimes(forecasts) {
+  const sorted = [...forecasts].sort((a, b) => a.runTime - b.runTime);
+  const firstSeen = new Map(); // "model|loc" -> Map<fingerprint, runTime>
+  for (const r of sorted) {
+    const key = `${r.model}|${r.location}`;
+    if (!firstSeen.has(key)) firstSeen.set(key, new Map());
+    const seen = firstSeen.get(key);
+    const fp = fingerprintHours(r.hours);
+    if (!seen.has(fp)) seen.set(fp, r.runTime);
+    r._runTime = seen.get(fp);
+  }
+  return sorted;
+}
+
+// Reduce a bucket's deduplicated (valid-time -> pair) map into aggregate stats.
+function reduceCell(pairMap) {
+  let n = 0, sumAbs = 0, sumSigned = 0, sumDirScore = 0;
+  let nSpeed = 0, sumSpeedAbs = 0, sumSpeedScore = 0, sumVec2 = 0;
+  let nPersist = 0, sumPersistAbs = 0;
+  for (const p of pairMap.values()) {
+    const dErr = normalize(p.fDir - p.o.dir);
+    const dErrDeg = (Math.abs(dErr) * 180) / Math.PI;
+    n++;
+    sumAbs += Math.abs(dErr);
+    sumSigned += dErr;
+    sumDirScore += Math.max(0, 1 - dErrDeg / 180);
+    if (p.fSpeed != null && typeof p.o.speed === "number") {
+      const sErr = Math.abs(p.fSpeed - p.o.speed);
+      nSpeed++;
+      sumSpeedAbs += sErr;
+      sumSpeedScore += Math.max(0, 1 - sErr / SCORE_SPEED_SCALE_MS);
+      const dx = p.fSpeed * Math.sin(p.fDir) - p.o.speed * Math.sin(p.o.dir);
+      const dy = p.fSpeed * Math.cos(p.fDir) - p.o.speed * Math.cos(p.o.dir);
+      sumVec2 += dx * dx + dy * dy;
+    }
+    if (p.baseObs) {
+      nPersist++;
+      sumPersistAbs += Math.abs(normalize(p.baseObs.dir - p.o.dir));
+    }
+  }
+  return { n, sumAbs, sumSigned, sumDirScore, nSpeed, sumSpeedAbs, sumSpeedScore, sumVec2, nPersist, sumPersistAbs };
+}
+
 // Pair archived forecasts with observations and aggregate error statistics
 // per (location, model, lead-time bucket) over the verification window.
 //
-// Every pair also gets a persistence comparison: "the wind stays as it was
-// when the forecast was fetched". A model only has skill if it beats that.
+// Two corrections vs. a naive point-by-point pass:
+//   1. Lead time is measured from each forecast's *attributed run time*
+//      (see attributeRunTimes), not from the fetch that happened to serve it.
+//   2. Each (bucket, valid time) contributes exactly one verification — the
+//      freshest run whose lead lands in that bucket — instead of one per fetch.
+//      This removes a ~28× autocorrelated over-count that made `n` and every
+//      error average misleading. The pre-dedup count is kept as `nRaw`.
+//
+// Every pair also gets a persistence comparison: "the wind stays as it was at
+// the run's init". A model only has skill if it beats that.
 //
 // Each model entry also receives a `composite` score (0–1) computed from
 // change-event detection across the full ≤48h lead-time horizon.
@@ -246,75 +322,60 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
   }
   for (const arr of obsByLoc.values()) arr.sort((a, b) => a.t - b.t);
 
-  const acc = new Map(); // loc -> model -> per-bucket accumulator
+  // Collapse re-served fetches back onto their true runs before scoring.
+  const runs = attributeRunTimes(forecasts);
+
+  // acc: loc -> model -> BUCKETS.map(Map<validTime, pair>) — deduped pairs.
+  // rawCounts: loc -> model -> BUCKETS.map(int) — pairs before dedup (nRaw).
+  const acc = new Map();
+  const rawCounts = new Map();
 
   // forecastSeries: "loc|model" -> Map<validTime_ms, {t, dir, speed, runTime}>
-  // Tracks the latest run's forecast for each valid time, for composite scoring.
+  // Latest run's forecast per valid time, for composite scoring.
   const forecastSeries = new Map();
 
   const cellsFor = (loc, model) => {
-    if (!acc.has(loc)) acc.set(loc, new Map());
-    const m = acc.get(loc);
-    if (!m.has(model)) {
-      m.set(
-        model,
-        BUCKETS.map(() => ({
-          n: 0,
-          sumAbs: 0,
-          sumSigned: 0,
-          sumDirScore: 0,   // sum of max(0, 1 - |err°|/180) — M6 formula
-          nSpeed: 0,
-          sumSpeedAbs: 0,
-          sumSpeedScore: 0, // sum of max(0, 1 - |err_ms|/SCORE_SPEED_SCALE_MS)
-          sumVec2: 0,
-          nPersist: 0,
-          sumPersistAbs: 0,
-          nPersistSpeed: 0,
-          sumPersistSpeedAbs: 0,
-        }))
-      );
+    if (!acc.has(loc)) {
+      acc.set(loc, new Map());
+      rawCounts.set(loc, new Map());
     }
-    return m.get(model);
+    const m = acc.get(loc);
+    const rc = rawCounts.get(loc);
+    if (!m.has(model)) {
+      m.set(model, BUCKETS.map(() => new Map()));
+      rc.set(model, BUCKETS.map(() => 0));
+    }
+    return { cells: m.get(model), raw: rc.get(model) };
   };
 
-  for (const run of forecasts) {
+  for (const run of runs) {
+    const runTime = run._runTime != null ? run._runTime : run.runTime;
     const obs = obsByLoc.get(run.location);
     if (!obs || obs.length === 0) continue;
-    const baseObs = nearestObs(obs, run.runTime, 2 * TOL_MS);
+    const baseObs = nearestObs(obs, runTime, 2 * TOL_MS);
     const seriesKey = `${run.location}|${run.model}`;
 
     for (const h of run.hours) {
-      if (h.t > now || h.t < windowStart || h.t < run.runTime) continue;
-      const leadMs = h.t - run.runTime;
+      if (h.t > now || h.t < windowStart || h.t < runTime) continue;
+      const leadMs = h.t - runTime;
       const bi = bucketIndexForLead(leadMs);
 
-      // Point-by-point error accumulation (existing scoreboard logic)
+      // One deduped verification per (bucket, valid time): freshest run wins.
       if (bi >= 0) {
         const o = nearestObs(obs, h.t, TOL_MS);
         if (o) {
-          const cell = cellsFor(run.location, run.model)[bi];
-          const dErr = normalize(h.dir - o.dir);
-          const dErrDeg = Math.abs(dErr) * 180 / Math.PI;
-          cell.n++;
-          cell.sumAbs += Math.abs(dErr);
-          cell.sumSigned += dErr;
-          cell.sumDirScore += Math.max(0, 1 - dErrDeg / 180);
-          if (typeof h.speed === "number" && typeof o.speed === "number") {
-            const sErr = Math.abs(h.speed - o.speed);
-            cell.nSpeed++;
-            cell.sumSpeedAbs += sErr;
-            cell.sumSpeedScore += Math.max(0, 1 - sErr / SCORE_SPEED_SCALE_MS);
-            const dx = h.speed * Math.sin(h.dir) - o.speed * Math.sin(o.dir);
-            const dy = h.speed * Math.cos(h.dir) - o.speed * Math.cos(o.dir);
-            cell.sumVec2 += dx * dx + dy * dy;
-          }
-          if (baseObs) {
-            cell.nPersist++;
-            cell.sumPersistAbs += Math.abs(normalize(baseObs.dir - o.dir));
-            if (typeof o.speed === "number" && typeof baseObs.speed === "number") {
-              cell.nPersistSpeed++;
-              cell.sumPersistSpeedAbs += Math.abs(baseObs.speed - o.speed);
-            }
+          const { cells, raw } = cellsFor(run.location, run.model);
+          raw[bi]++;
+          const cellMap = cells[bi];
+          const existing = cellMap.get(h.t);
+          if (!existing || runTime > existing.runTime) {
+            cellMap.set(h.t, {
+              runTime,
+              o,
+              fDir: h.dir,
+              fSpeed: typeof h.speed === "number" ? h.speed : null,
+              baseObs,
+            });
           }
         }
       }
@@ -324,12 +385,12 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
         if (!forecastSeries.has(seriesKey)) forecastSeries.set(seriesKey, new Map());
         const series = forecastSeries.get(seriesKey);
         const existing = series.get(h.t);
-        if (!existing || run.runTime > existing.runTime) {
+        if (!existing || runTime > existing.runTime) {
           series.set(h.t, {
             t: h.t,
             dir: h.dir,
             speed: typeof h.speed === "number" ? h.speed : null,
-            runTime: run.runTime,
+            runTime,
           });
         }
       }
@@ -342,6 +403,7 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
     const obsPts = (obsByLoc.get(loc) || []).filter(
       (o) => o.t >= windowStart && o.t <= now
     );
+    const rcModels = rawCounts.get(loc);
     const entry = { label: loc, models: [] };
     for (const [model, cells] of models) {
       const seriesKey = `${loc}|${model}`;
@@ -349,11 +411,13 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
       const fcstPts = seriesMap
         ? [...seriesMap.values()].sort((a, b) => a.t - b.t)
         : [];
+      const raw = rcModels.get(model);
 
       entry.models.push({
         model,
         composite: computeComposite(obsPts, fcstPts),
-        buckets: cells.map((c, i) => {
+        buckets: cells.map((pairMap, i) => {
+          const c = reduceCell(pairMap);
           const dirMAE = c.n ? c.sumAbs / c.n : null;
           const persistMAE = c.nPersist ? c.sumPersistAbs / c.nPersist : null;
           const dirSkill = dirMAE != null && persistMAE ? 1 - dirMAE / persistMAE : null;
@@ -369,7 +433,8 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
               : dirScore;
           return {
             id: BUCKETS[i].id,
-            n: c.n,
+            n: c.n,           // deduped — honest independent-ish sample count
+            nRaw: raw[i],     // pre-dedup pairs (for transparency/debugging)
             score,
             dirMAE_deg: dirMAE != null ? toDeg(dirMAE) : null,
             dirBias_deg: c.n ? toDeg(c.sumSigned / c.n) : null,
@@ -400,5 +465,7 @@ module.exports = {
   zigzagEvents,
   matchEvents,
   computeComposite,
+  fingerprintHours,
+  attributeRunTimes,
   computeScoreboard,
 };

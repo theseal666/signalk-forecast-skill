@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Scores weather forecast models against observed wind — which model fits your waters best",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "keywords": [
     "signalk-node-server-plugin",
     "signalk-webapp"
