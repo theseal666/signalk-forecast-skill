@@ -10,6 +10,9 @@
     "signalk-node-server-plugin",
     "signalk-webapp"
   ],
+  "signalk": {
+    "appIcon": "icon.png"
+  },
   "author": "theseal666",
   "license": "ISC",
   "repository": {

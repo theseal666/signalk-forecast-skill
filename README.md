@@ -1,5 +1,9 @@
 # signalk-forecast-skill
 
+<p align="center">
+  <img src="IMG/logo.png" alt="Forecast Skill" width="320">
+</p>
+
 A SignalK plugin that fetches wind forecasts from multiple weather models,
 verifies them against real observations (ViVa weather stations, or any
 SignalK wind source), and keeps a running **skill scoreboard** — which model

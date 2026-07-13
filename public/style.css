@@ -20,6 +20,26 @@ header {
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
 }
 
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-right: 8px;
+}
+
+.brand img {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+}
+
+.brand span {
+    font-weight: bold;
+    letter-spacing: 1px;
+    font-size: 0.95rem;
+    color: #e0e0e0;
+}
+
 .control {
     display: flex;
     flex-direction: column;
