@@ -9,12 +9,16 @@ let currentLocation = null;
 let currentMetric = "score";
 
 // Lead-time groupings a sailor actually thinks in.
-const RACE_BUCKETS = ["3h", "6h", "12h", "24h"]; // ranking + summary window
+// The ranking/recommendation window is exactly the union of the two near
+// horizons (now + race), so the headline pick can never contradict both of
+// them. The day-before horizon sits outside it — that is where a flip is the
+// intended Q3 signal.
 const HORIZONS = [
   { id: "now", label: "Now → 3 h", ids: ["1h", "2h", "3h"] },
-  { id: "morning", label: "6 → 12 h", ids: ["6h", "12h"] },
-  { id: "before", label: "24 h → 2 d", ids: ["24h", "2d"] },
+  { id: "morning", label: "Race · 6 → 12 h", ids: ["6h", "12h"] },
+  { id: "before", label: "Day before · 24 h+", ids: ["24h", "2d"] },
 ];
+const RACE_BUCKETS = ["1h", "2h", "3h", "6h", "12h"]; // = now ∪ race horizons
 
 const METRIC_META = {
   score:        { unit: "%", lowerBetter: false, digits: 0, scale: 100 },

@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1512" height="712" viewBox="0 0 1512 712" font-family="DejaVu Sans, Verdana, sans-serif">
+  <rect width="1512" height="712" fill="#121212"/>
+
+  <!-- header -->
+  <rect width="1512" height="88" fill="#1e1e1e"/>
+  <text x="90" y="52" fill="#e0e0e0" font-size="21" font-weight="bold" letter-spacing="1">FORECAST SKILL</text>
+  <text x="360" y="33" fill="#888" font-size="11" letter-spacing="1">STATION</text>
+  <rect x="360" y="40" width="248" height="30" rx="4" fill="#222" stroke="#444"/>
+  <text x="373" y="60" fill="#fff" font-size="14" font-weight="bold">mitholmarna — 8 nm</text>
+  <text x="591" y="59" fill="#aaa" font-size="12">▾</text>
+  <text x="1488" y="52" fill="#9a9a9a" font-size="13" text-anchor="end">7-day window · updated 16:16</text>
+
+  <!-- recommendation card -->
+  <rect x="24" y="108" width="1464" height="104" rx="10" fill="#12211b" stroke="#2f6b57"/>
+  <rect x="24" y="108" width="4" height="104" fill="#2fd1b0"/>
+  <text x="48" y="136" fill="#6fbfa6" font-size="12" letter-spacing="1">RECOMMENDED FOR MITHOLMARNA</text>
+  <text x="48" y="170" fill="#eafaf5" font-size="30" font-weight="bold">MET Norway Nordic</text>
+  <text x="360" y="170" fill="#8fe0c8" font-size="20" font-weight="bold">73%</text>
+  <text x="48" y="200" fill="#cfe3dc" font-size="15">≈26° average direction error, catches 9/11 shifts. Apply a 4° left correction before drawing laylines.</text>
+
+  <!-- section: best match -->
+  <text x="24" y="250" fill="#8a8a8a" font-size="12" letter-spacing="1">BEST MATCH THIS WEEK</text>
+  <text x="235" y="250" fill="#5f5f5f" font-size="12">— ranked by how close each model has been. Hover any figure for what it means.</text>
+
+  <!-- rank card 1 (top) -->
+  <rect x="24" y="266" width="1464" height="60" rx="8" fill="#172019" stroke="#2f6b57"/>
+  <text x="52" y="303" fill="#2fd1b0" font-size="22" font-weight="bold" text-anchor="middle">1</text>
+  <text x="92" y="292" fill="#e8e8e8" font-size="16" font-weight="bold">MET Norway Nordic</text>
+  <text x="92" y="312" fill="#9fb0aa" font-size="13">≈26° off · reads +4° (right) · catches 9/11 shifts · beats “no change” from 3h</text>
+  <rect x="92" y="316" width="1250" height="6" rx="3" fill="#262626"/>
+  <rect x="92" y="316" width="912" height="6" rx="3" fill="#79b23a"/>
+  <text x="1470" y="304" fill="#eee" font-size="28" font-weight="bold" text-anchor="end">73</text>
+  <text x="1478" y="304" fill="#888" font-size="13">%</text>
+
+  <!-- rank card 2 -->
+  <rect x="24" y="334" width="1464" height="60" rx="8" fill="#1a1a1a" stroke="#2a2a2a"/>
+  <text x="52" y="371" fill="#666" font-size="22" font-weight="bold" text-anchor="middle">2</text>
+  <text x="92" y="360" fill="#e8e8e8" font-size="16" font-weight="bold">ECMWF IFS 0.25°</text>
+  <text x="92" y="380" fill="#9fb0aa" font-size="13">≈23° off · reads +12° (right) · catches 2/11 shifts · beats “no change” from 3h</text>
+  <rect x="92" y="384" width="1250" height="6" rx="3" fill="#262626"/>
+  <rect x="92" y="384" width="900" height="6" rx="3" fill="#7bb03a"/>
+  <text x="1470" y="372" fill="#eee" font-size="28" font-weight="bold" text-anchor="end">72</text>
+  <text x="1478" y="372" fill="#888" font-size="13">%</text>
+
+  <!-- rank card 3 -->
+  <rect x="24" y="402" width="1464" height="60" rx="8" fill="#1a1a1a" stroke="#2a2a2a"/>
+  <text x="52" y="439" fill="#666" font-size="22" font-weight="bold" text-anchor="middle">3</text>
+  <text x="92" y="428" fill="#e8e8e8" font-size="16" font-weight="bold">DWD ICON</text>
+  <text x="92" y="448" fill="#9fb0aa" font-size="13">≈24° off · reads +5° (right) · catches 5/11 shifts · beats “no change” from 3h</text>
+  <rect x="92" y="452" width="1250" height="6" rx="3" fill="#262626"/>
+  <rect x="92" y="452" width="888" height="6" rx="3" fill="#7cae3a"/>
+  <text x="1470" y="440" fill="#eee" font-size="28" font-weight="bold" text-anchor="end">71</text>
+  <text x="1478" y="440" fill="#888" font-size="13">%</text>
+
+  <!-- rank card 4 -->
+  <rect x="24" y="470" width="1464" height="60" rx="8" fill="#1a1a1a" stroke="#2a2a2a"/>
+  <text x="52" y="507" fill="#666" font-size="22" font-weight="bold" text-anchor="middle">4</text>
+  <text x="92" y="496" fill="#e8e8e8" font-size="16" font-weight="bold">NOAA GFS</text>
+  <text x="92" y="516" fill="#9fb0aa" font-size="13">≈27° off · reads +22° (right) · catches 5/11 shifts · beats “no change” from 3h</text>
+  <rect x="92" y="520" width="1250" height="6" rx="3" fill="#262626"/>
+  <rect x="92" y="520" width="875" height="6" rx="3" fill="#7eac3a"/>
+  <text x="1470" y="508" fill="#eee" font-size="28" font-weight="bold" text-anchor="end">70</text>
+  <text x="1478" y="508" fill="#888" font-size="13">%</text>
+
+  <!-- section: horizon -->
+  <text x="24" y="566" fill="#8a8a8a" font-size="12" letter-spacing="1">DOES THE PICK CHANGE BY FORECAST HORIZON?</text>
+  <text x="560" y="566" fill="#5f5f5f" font-size="12">— who is best now vs. later. If it flips, that is your reason to switch.</text>
+
+  <rect x="24" y="582" width="474" height="58" rx="8" fill="#1a1a1a" stroke="#2a2a2a"/>
+  <text x="42" y="606" fill="#777" font-size="11" letter-spacing="1">NOW → 3 H</text>
+  <text x="42" y="628" fill="#e8e8e8" font-size="16" font-weight="bold">MET Norway Nordic</text>
+  <text x="200" y="628" fill="#888" font-size="13">74%</text>
+
+  <rect x="519" y="582" width="474" height="58" rx="8" fill="#1a1a1a" stroke="#2a2a2a"/>
+  <text x="537" y="606" fill="#777" font-size="11" letter-spacing="1">RACE · 6 → 12 H</text>
+  <text x="537" y="628" fill="#e8e8e8" font-size="16" font-weight="bold">MET Norway Nordic</text>
+  <text x="695" y="628" fill="#888" font-size="13">71%</text>
+
+  <rect x="1014" y="582" width="474" height="58" rx="8" fill="#1a1a1a" stroke="#2a2a2a"/>
+  <text x="1032" y="606" fill="#777" font-size="11" letter-spacing="1">DAY BEFORE · 24 H+</text>
+  <text x="1032" y="628" fill="#e8e8e8" font-size="16" font-weight="bold">MET Norway Nordic</text>
+  <text x="1190" y="628" fill="#888" font-size="13">67%</text>
+
+  <text x="24" y="674" fill="#cfe3dc" font-size="14">✓  MET Norway Nordic is best across every horizon — no reason to switch mid-race.</text>
+</svg>

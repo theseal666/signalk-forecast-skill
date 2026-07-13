@@ -35,7 +35,7 @@ observations (stations) ──┘                                           + bi
 A model only earns *skill* by beating **persistence** ("the wind stays as it
 is now") — the honest baseline that separates real forecasting from noise.
 
-![Scoreboard score view — ECMWF, MET Norway, GFS, ICON scored at Hamneskar](IMG/scoreboard-score-view.png)
+![Forecast Skill webapp — recommendation, best-match ranking, and best-model-by-horizon at Mitholmarna](IMG/webapp-overview.png)
 
 ## How it works
 
@@ -64,7 +64,6 @@ is now") — the honest baseline that separates real forecasting from noise.
    - **Advanced** (collapsible) — the full per lead-time metric chart.
    - **Station picker** — sorted nearest-to-boat when GPS is available.
 
-![Location picker sorted by distance from boat](IMG/station-picker-distance-sort.png)
 
 ## Metrics reference
 
