@@ -241,6 +241,15 @@ Version-stamped assets (`?v=0.4.0`) — bump on every public/ change.
   See design note below.
 - 🔲 **M8 (optional)**: windshift's dashboard overlays `/curves` on its
   waterfall via HTTP — no code sharing needed.
+- 🔲 **M9 — live forward forecast (the payoff view)**: for a chosen station,
+  show what every model is forecasting *from now out to 48 h* — one wind line
+  per model, the best-ranked model drawn bold and bias-corrected, model spread
+  shaded as a confidence cue. Closes the loop: the scoreboard says *which* model
+  to trust; this shows *what* that model (and the others) predict for the race.
+  See design note below.
+- 🔲 **M10 — Murphy-aligned quality depth**: distributions-oriented additions
+  from the Murphy (1993) alignment review. See design note below and
+  `docs/murphy-1993-alignment.md`.
 
 ### Design note — composite skill score (M5) — IMPLEMENTED in verify.js
 
@@ -346,6 +355,72 @@ is the landing view, with detail and spaghetti as secondary tabs.
 
 Tab state in URL hash (`#score`, `#detail`, `#spaghetti`) so bookmarks and
 back-button work. No routing library needed — just `hashchange` + show/hide.
+
+### Design note — live forward forecast view (M9)
+
+Everything so far looks *backward*: which model has matched reality. M9 adds the
+*forward* view — the actual payoff a racer reads before the start.
+
+**Question it answers:** "From now to +48 h at this station, what is each model
+saying — and does that change the plan?"
+
+**Data:** already in the archive. The most recent fetched run per (model,
+location) holds hourly dir + speed out to 8 days; we just serve the next 48 h of
+it. No new fetching, no new storage.
+
+**Backend — new `/forecast?location=<id>` endpoint:** return, per model, the
+latest run's hourly series from `now` to `now + 48 h`:
+```
+{ location, generatedAt,
+  models: { <model_id>: [ { t, dir, speed }, ... ] },
+  ranking: [ { model, matchScore, dirBias_deg } ]   // from the scoreboard
+}
+```
+
+**Webapp — forward spaghetti:**
+- One wind-direction line per model, now → +48 h (X = time, Y = TWD in °,
+  unwrapped so it doesn't jump at 360/0).
+- The **best-ranked model** (from the scoreboard) drawn **bold**; the rest faint.
+- Offer a **bias-corrected** overlay: subtract each model's `dirBias` so the line
+  shows "what it really means" at this station (the dirBias correction the board
+  already computes).
+- **Model spread = confidence cue:** where the lines bunch, all models agree —
+  trust it; where they fan out, it's genuinely uncertain, sail conservatively.
+- Mark detected **shift events** (reuse `zigzagEvents`) so the eye lands on the
+  veers/backs and their timing, not every wiggle.
+- Speed as a secondary panel or toggle (same treatment).
+- Optional **consensus line** (circular-mean of models, or trust-weighted by
+  matchScore) as a single "house view".
+
+**Why it's coherent with the non-goal ("not a viewer first"):** the viewer is in
+service of the trust ranking. Verification stays the product; this is where the
+*trusted* model's guidance — corrected and put in context of model agreement — is
+actually read off before a race.
+
+Ties into M6 (past per-timeslot spaghetti) and M7 (tabs): Score / Detail /
+**Forecast** / Spaghetti.
+
+### Design note — Murphy-aligned quality depth (M10)
+
+From the alignment review against Murphy (1993), *What Is a Good Forecast?*
+(full analysis in `docs/murphy-1993-alignment.md`). We already implement his
+**accuracy**, **skill-vs-reference** (persistence), and **bias** aspects, verify
+**stratified** by station × lead × model, and keep his core caution that no
+single score is the whole story. Deeper, distributions-oriented additions:
+
+- **Scatter / conditional-mean-by-wind-sector panel** — forecast vs observed
+  direction, binned by sector; exposes bias-by-regime (e.g. a sea-breeze sector
+  where a model is reliably 15° off). Cheapest, most Murphy-aligned add.
+- **Association** — add a correlation of paired forecast/observed to the
+  per-bucket metrics.
+- **If ensemble / probabilistic wind is ingested** (Open-Meteo has ensemble
+  APIs): reliability diagram + sharpness + a proper probabilistic score
+  (Brier / CRPS). Only these unlock Murphy's reliability/resolution aspects,
+  which are undefined for our current single-value deterministic forecasts.
+- **Toward true value (Type 3)** — express the recommendation in racing payoff
+  ("expected boat-lengths gained on a beat" / cost–loss framing) rather than
+  degrees. This is the number a racer actually optimises; quality is only a
+  surrogate for it (Murphy's central caveat).
 
 ### Design note — international observation sources (future)
 

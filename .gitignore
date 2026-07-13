@@ -1,2 +1,5 @@
 .DS_Store
 node_modules/
+
+# copyrighted reference papers — keep local, do not publish
+docs/references/
