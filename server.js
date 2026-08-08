@@ -11,7 +11,7 @@ const { loadConfig, saveConfig } = require("./config.js");
 const createStore = require("./store.js");
 const openMeteo = require("./providers/openMeteo.js");
 const { circularMeanFromSums, computeScoreboard } = require("./verify.js");
-const { fetchStationIndex } = require("./vivaLocations.js");
+const { fetchStationIndex, fetchStationWind } = require("./vivaLocations.js");
 
 const PROVIDERS = [openMeteo];
 const OBS_BUCKET_MS = 10 * 60 * 1000;
@@ -131,6 +131,23 @@ async function refreshStationIndex() {
     }
   } catch (e) {
     console.error("[viva] station index fetch failed:", e.message);
+  }
+}
+
+// Poll live wind for every ViVa-sourced location and feed it into the same
+// bucketing pipeline POST /api/observations uses — makes standalone mode
+// self-sufficient for ViVa stations without any external bridge.
+async function pollVivaObservations() {
+  const vivaLocations = [...locationSource].filter(([, src]) => src.type === "viva");
+  for (const [label, src] of vivaLocations) {
+    try {
+      const wind = await fetchStationWind(src.stationId);
+      if (!wind) continue;
+      addObservation(label, "dir", (wind.dirDeg * Math.PI) / 180);
+      addObservation(label, "speed", wind.speedMs);
+    } catch (e) {
+      console.error(`[viva] wind poll failed for '${label}' (#${src.stationId}):`, e.message);
+    }
   }
 }
 
@@ -322,7 +339,8 @@ const server = http.createServer(async (req, res) => {
         return json(res, 409, { error: "a fetch cycle is already running" });
       }
       await refreshStationIndex();
-      await fetchAll();
+      await Promise.all([fetchAll(), pollVivaObservations()]);
+      for (const label of [...buckets.keys()]) flushBucket(label, true);
       scoreboardCache = null; // force the next /api/scoreboard to recompute
       return json(res, 200, { ok: true, counters, locations: cfg.locations.map((l) => l.label) });
     }
@@ -398,10 +416,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+const VIVA_POLL_INTERVAL_MS = 60 * 1000; // matches signalk-viva's default pollInterval
+
 let stationTimer = null;
 let flushTimer = null;
 let pruneTimer = null;
 let fetchTimer = null;
+let vivaPollTimer = null;
 
 // Re-armed whenever fetchIntervalHours changes via PUT /api/config.
 function rescheduleFetchTimer() {
@@ -425,6 +446,10 @@ function start() {
   setTimeout(fetchAll, 60 * 1000);
   rescheduleFetchTimer();
 
+  // Give station discovery a head start so the first poll has something to poll.
+  setTimeout(pollVivaObservations, 15 * 1000);
+  vivaPollTimer = setInterval(pollVivaObservations, VIVA_POLL_INTERVAL_MS);
+
   server.listen(cfg.port, () => {
     console.log(`forecast-skill standalone listening on :${cfg.port} (data dir: ${cfg.dataDir})`);
   });
@@ -432,7 +457,7 @@ function start() {
 
 function shutdown() {
   console.log("shutting down...");
-  for (const t of [stationTimer, flushTimer, pruneTimer, fetchTimer]) {
+  for (const t of [stationTimer, flushTimer, pruneTimer, fetchTimer, vivaPollTimer]) {
     if (t) clearInterval(t);
   }
   for (const label of [...buckets.keys()]) flushBucket(label, true);
