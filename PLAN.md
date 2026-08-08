@@ -250,6 +250,12 @@ Version-stamped assets (`?v=0.4.0`) — bump on every public/ change.
 - 🔲 **M10 — Murphy-aligned quality depth**: distributions-oriented additions
   from the Murphy (1993) alignment review. See design note below and
   `docs/murphy-1993-alignment.md`.
+- 🔲 **M11 — air pressure ingestion + trend alert**: ingest ViVa's `Lufttryck`
+  (air pressure) sample alongside wind, track the rate of change, and surface
+  a fast-drop warning in the webapp — a dropping barometer is one of the most
+  reliable tells that a front or a blow is inbound, ahead of the wind itself
+  changing. Also finally scores the composite score's reserved 10% baro-trend
+  weight (see M5 above). See design note below.
 
 ### Design note — composite skill score (M5) — IMPLEMENTED in verify.js
 
@@ -421,6 +427,45 @@ single score is the whole story. Deeper, distributions-oriented additions:
   ("expected boat-lengths gained on a beat" / cost–loss framing) rather than
   degrees. This is the number a racer actually optimises; quality is only a
   surrogate for it (Murphy's central caveat).
+
+### Design note — air pressure ingestion + trend alert (M11)
+
+**Why:** a fast-falling barometer is one of the oldest and most reliable
+tells that weather is about to change — often clearer and earlier than the
+wind itself shifting. A sailor watching the glass drop 3+ hPa in 3 h knows
+something is coming before any model run confirms it. This is also the last
+missing input for the composite score's baro-trend weight (10%, reserved
+since M5 — see the composite design note above), which currently gets
+silently redistributed to the other components because no pressure path is
+configured.
+
+**Source:** ViVa already reports it — the same live endpoint used for wind
+(`vivastation/<id>` — see `vivaLocations.js`'s `fetchStationWind`) also
+returns a `Lufttryck` sample (`Type: "pressure"`, unit `hPa`) at stations
+that have a barometer (not every station does — e.g. Stenungsund has
+`Lufttryck` but no wind; Skallen/Vinga/Mitholmarna have wind but not every
+one carries pressure). No new external source needed, just parse the
+sample already coming back from a call we already make.
+
+**What to build:**
+
+- Extend `fetchStationWind` (or add a sibling `fetchStationPressure`) to
+  also return `{ pressureHpa, updated }` when a `Lufttryck` sample is
+  present, and archive it — a new `pressure` field alongside `dir`/`speed`
+  in the existing observations bucket, or a parallel `pressures/` store
+  keyed the same way as `observations/`.
+- **Trend detection**: rolling rate of change (hPa / 3 h) per station,
+  same spirit as the composite's zigzag event detection in `verify.js`.
+  A widely-used rule of thumb: ≥ 3 hPa/3h = "fast fall", worth flagging;
+  ≥ 6 hPa/3h enters gale-warning territory.
+- **Webapp**: a small alert/badge on the station's recommendation card when
+  a fast fall is currently in progress — this is a direct, actionable
+  signal independent of which forecast model is "best", so it should be
+  visible even before enough data exists to trust the scoreboard.
+- **Composite score**: once a pressure path is configured, score the
+  reserved 10% baro-trend component the same way the direction/speed event
+  components are scored today — did the model predict the pressure
+  drop's timing and magnitude.
 
 ### Design note — international observation sources (future)
 
