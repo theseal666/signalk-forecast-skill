@@ -390,6 +390,167 @@ function refresh() {
   });
 }
 
+// ---------- force update ----------
+document.getElementById("force-update-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("force-update-btn");
+  const info = document.getElementById("window-info");
+  const prevInfo = info.textContent;
+  btn.disabled = true;
+  btn.classList.add("spinning");
+  info.textContent = "Fetching latest forecasts…";
+  try {
+    const res = await fetch("/api/fetch-now", { method: "POST" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "fetch failed");
+    await refresh();
+  } catch (e) {
+    info.textContent = "Force update failed: " + e.message;
+    setTimeout(() => { info.textContent = prevInfo; }, 4000);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("spinning");
+  }
+});
+
+// ---------- settings panel ----------
+let allStations = [];
+
+function renderStationChecklist(selectedIds, filterText) {
+  const el = document.getElementById("cfg-stations");
+  const q = (filterText || "").trim().toLowerCase();
+  const rows = allStations.filter((s) => !q || s.name.toLowerCase().includes(q));
+  el.innerHTML = "";
+  if (rows.length === 0) {
+    el.innerHTML = `<div class="empty">no stations match “${filterText}”</div>`;
+    return;
+  }
+  rows.forEach((s) => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = s.id;
+    cb.checked = selectedIds.has(s.id);
+    const name = document.createElement("span");
+    name.textContent = s.name;
+    const idSpan = document.createElement("span");
+    idSpan.className = "station-id";
+    idSpan.textContent = "#" + s.id;
+    label.appendChild(cb);
+    label.appendChild(name);
+    label.appendChild(idSpan);
+    el.appendChild(label);
+  });
+}
+
+function selectedStationIds() {
+  const ids = new Set();
+  document.querySelectorAll("#cfg-stations input[type=checkbox]:checked").forEach((cb) => ids.add(Number(cb.value)));
+  return ids;
+}
+
+async function openSettings() {
+  const errEl = document.getElementById("settings-error");
+  errEl.textContent = "";
+  document.getElementById("settings-btn").classList.add("spin");
+  setTimeout(() => document.getElementById("settings-btn").classList.remove("spin"), 500);
+
+  const [cfg, models, stations] = await Promise.all([
+    fetch("/api/config").then((r) => r.json()),
+    fetch("/api/models").then((r) => r.json()),
+    fetch("/api/stations").then((r) => (r.ok ? r.json() : [])),
+  ]);
+  allStations = stations;
+
+  document.getElementById("cfg-interval").value = cfg.fetchIntervalHours;
+  document.getElementById("cfg-retention").value = cfg.retentionDays;
+  document.getElementById("cfg-window").value = cfg.verifyWindowDays;
+
+  const modelsEl = document.getElementById("cfg-models");
+  modelsEl.innerHTML = "";
+  const selectedModels = new Set(cfg.models || models.selected);
+  models.available.forEach((m) => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = m.id;
+    cb.checked = selectedModels.has(m.id);
+    const name = document.createElement("span");
+    name.textContent = m.label;
+    label.appendChild(cb);
+    label.appendChild(name);
+    modelsEl.appendChild(label);
+  });
+
+  const selectedStations = new Set(cfg.vivaStationIds || []);
+  renderStationChecklist(selectedStations, "");
+  document.getElementById("cfg-station-search").value = "";
+
+  const unresolvedEl = document.getElementById("cfg-unresolved");
+  if (cfg.unresolvedVivaStationIds && cfg.unresolvedVivaStationIds.length) {
+    unresolvedEl.textContent =
+      `Not found in the ViVa index — check the number: ${cfg.unresolvedVivaStationIds.join(", ")}`;
+  } else {
+    unresolvedEl.textContent = "";
+  }
+
+  document.getElementById("settings-dialog").showModal();
+}
+
+document.getElementById("settings-btn").addEventListener("click", () => {
+  openSettings().catch((e) => console.error("failed to open settings:", e));
+});
+
+document.getElementById("cfg-station-search").addEventListener("input", (e) => {
+  const kept = selectedStationIds();
+  renderStationChecklist(kept, e.target.value);
+});
+
+document.getElementById("settings-cancel").addEventListener("click", () => {
+  document.getElementById("settings-dialog").close();
+});
+
+document.getElementById("settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById("settings-error");
+  errEl.textContent = "";
+
+  const models = [...document.querySelectorAll("#cfg-models input:checked")].map((cb) => cb.value);
+  const vivaStationIds = [...selectedStationIds()];
+  const fetchIntervalHours = Number(document.getElementById("cfg-interval").value);
+  const retentionDays = Number(document.getElementById("cfg-retention").value);
+  const verifyWindowDays = Number(document.getElementById("cfg-window").value);
+
+  if (models.length === 0) {
+    errEl.textContent = "Select at least one weather model.";
+    return;
+  }
+
+  const saveBtn = document.getElementById("settings-save");
+  saveBtn.disabled = true;
+  try {
+    const res = await fetch("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ models, vivaStationIds, fetchIntervalHours, retentionDays, verifyWindowDays }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "save failed");
+
+    const unresolvedEl = document.getElementById("cfg-unresolved");
+    if (body.unresolvedVivaStationIds && body.unresolvedVivaStationIds.length) {
+      unresolvedEl.textContent =
+        `Not found in the ViVa index — check the number: ${body.unresolvedVivaStationIds.join(", ")}`;
+      return; // let the user see the warning before closing
+    }
+    document.getElementById("settings-dialog").close();
+    refresh();
+  } catch (err) {
+    errEl.textContent = err.message;
+  } finally {
+    saveBtn.disabled = false;
+  }
+});
+
 document.getElementById("location-select").addEventListener("change", (e) => {
   currentLocation = e.target.value;
   render();

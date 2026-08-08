@@ -7,7 +7,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const { loadConfig } = require("./config.js");
+const { loadConfig, saveConfig } = require("./config.js");
 const createStore = require("./store.js");
 const openMeteo = require("./providers/openMeteo.js");
 const { circularMeanFromSums, computeScoreboard } = require("./verify.js");
@@ -38,14 +38,31 @@ let counters = {
   lastError: null,
 };
 
+// Tracks where each active location came from, so unchecking a station in
+// the settings panel actually stops it being fetched — 'manual' (config
+// file locations[]) and 'api' (POST /api/observations) entries are never
+// auto-removed, only 'viva' entries whose station id drops out of
+// vivaStationIds.
+let locationSource = new Map(); // label -> { type: 'manual'|'viva'|'api', stationId? }
+for (const l of cfg.locations) locationSource.set(l.label, { type: "manual" });
+
 function locationByLabel(label) {
   return cfg.locations.find((l) => l.label === label);
 }
 
-function addLocation(loc) {
+function addLocation(loc, source) {
   cfg.locations.push(loc);
   knownSlugs.add(loc.label);
+  locationSource.set(loc.label, source || { type: "manual" });
   console.log(`[locations] added '${loc.label}' at ${loc.latitude.toFixed(3)}, ${loc.longitude.toFixed(3)}`);
+}
+
+function removeLocation(label) {
+  cfg.locations = cfg.locations.filter((l) => l.label !== label);
+  knownSlugs.delete(label);
+  locationSource.delete(label);
+  buckets.delete(label);
+  console.log(`[locations] removed '${label}' — no longer in vivaStationIds`);
 }
 
 function flushBucket(label, force) {
@@ -84,52 +101,74 @@ function addObservation(label, kind, value) {
   }
 }
 
+let unresolvedVivaStationIds = [];
+
 async function refreshStationIndex() {
   try {
     stationIndex = await fetchStationIndex();
     console.log(`[viva] station index loaded: ${stationIndex.bySlug.size} slugs`);
+    unresolvedVivaStationIds = [];
+    const wantedIds = new Set(cfg.vivaStationIds.map(Number));
     for (const id of cfg.vivaStationIds) {
       const st = stationIndex.byId.get(Number(id));
       if (!st) {
         console.log(`[viva] station ID ${id} not found in index — check the number`);
+        unresolvedVivaStationIds.push(Number(id));
         continue;
       }
       if (knownSlugs.has(st.slug)) continue;
-      addLocation({
-        label: st.slug,
-        latitude: st.latitude,
-        longitude: st.longitude,
-      });
+      addLocation(
+        { label: st.slug, latitude: st.latitude, longitude: st.longitude },
+        { type: "viva", stationId: st.id }
+      );
+    }
+    // vivaStationIds is authoritative for which viva-sourced stations stay
+    // active — anything unchecked in the settings panel stops being fetched.
+    for (const [label, src] of [...locationSource]) {
+      if (src.type === "viva" && !wantedIds.has(Number(src.stationId))) {
+        removeLocation(label);
+      }
     }
   } catch (e) {
     console.error("[viva] station index fetch failed:", e.message);
   }
 }
 
+let fetchInProgress = false;
+
 async function fetchAll() {
+  if (fetchInProgress) {
+    console.log("[fetch] cycle already running — skipped");
+    return;
+  }
+  fetchInProgress = true;
   counters.lastFetchAt = Date.now();
-  for (const provider of PROVIDERS) {
-    for (const model of cfg.models) {
-      if (!provider.models.includes(model)) {
-        console.log(`[fetch] unknown model '${model}' for provider ${provider.name} — skipped`);
-        continue;
-      }
-      for (const loc of [...cfg.locations]) {
-        try {
-          const run = await provider.fetchRun(model, loc);
-          run.location = loc.label;
-          store.append("forecasts", run);
-          counters.forecastRuns++;
-        } catch (e) {
-          counters.fetchErrors++;
-          counters.lastError = `${model}@${loc.label}: ${e.message}`;
-          console.error(`[fetch] failed for ${model} at ${loc.label}: ${e.message}`);
+  try {
+    for (const provider of PROVIDERS) {
+      for (const model of cfg.models) {
+        if (!provider.models.includes(model)) {
+          console.log(`[fetch] unknown model '${model}' for provider ${provider.name} — skipped`);
+          continue;
         }
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        for (const loc of [...cfg.locations]) {
+          try {
+            const run = await provider.fetchRun(model, loc);
+            run.location = loc.label;
+            store.append("forecasts", run);
+            counters.forecastRuns++;
+          } catch (e) {
+            counters.fetchErrors++;
+            counters.lastError = `${model}@${loc.label}: ${e.message}`;
+            console.error(`[fetch] failed for ${model} at ${loc.label}: ${e.message}`);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
       }
     }
+    console.log(`[fetch] cycle done — ${counters.forecastRuns} runs archived total, ${counters.fetchErrors} errors`);
+  } finally {
+    fetchInProgress = false;
   }
-  console.log(`[fetch] cycle done — ${counters.forecastRuns} runs archived total, ${counters.fetchErrors} errors`);
 }
 
 function buildScoreboard() {
@@ -166,10 +205,40 @@ function handleObservationPost(body) {
     if (typeof latitude !== "number" || typeof longitude !== "number") {
       throw new Error(`unknown location '${location}' — include latitude/longitude to register it`);
     }
-    addLocation({ label: location, latitude, longitude });
+    addLocation({ label: location, latitude, longitude }, { type: "api" });
   }
   addObservation(location, "dir", (dirDeg * Math.PI) / 180);
   if (typeof speedMs === "number") addObservation(location, "speed", speedMs);
+}
+
+// ---- PUT /api/config: settings-panel edits ----
+function applyConfigUpdate(body) {
+  if (body.vivaStationIds !== undefined) {
+    if (!Array.isArray(body.vivaStationIds)) throw new Error("vivaStationIds must be an array of numbers");
+    const ids = body.vivaStationIds.map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    cfg.vivaStationIds = [...new Set(ids)];
+  }
+  if (body.models !== undefined) {
+    if (!Array.isArray(body.models) || body.models.length === 0) {
+      throw new Error("models must be a non-empty array");
+    }
+    const valid = new Set(openMeteo.models);
+    for (const m of body.models) {
+      if (!valid.has(m)) throw new Error(`unknown model '${m}'`);
+    }
+    cfg.models = [...new Set(body.models)];
+  }
+  for (const [key, min] of [
+    ["fetchIntervalHours", 1],
+    ["retentionDays", 1],
+    ["verifyWindowDays", 1],
+  ]) {
+    if (body[key] === undefined) continue;
+    const n = Number(body[key]);
+    if (!Number.isFinite(n) || n < min) throw new Error(`${key} must be a number >= ${min}`);
+    cfg[key] = n;
+  }
+  rescheduleFetchTimer();
 }
 
 // ---- minimal static file server for public/ ----
@@ -238,7 +307,7 @@ const server = http.createServer(async (req, res) => {
       if (!stationIndex) return json(res, 503, { error: "station index not yet loaded" });
       const list = [];
       for (const [slug, st] of stationIndex.bySlug) {
-        list.push({ slug, name: st.name || slug, latitude: st.latitude, longitude: st.longitude });
+        list.push({ id: st.id, slug, name: st.name || slug, latitude: st.latitude, longitude: st.longitude });
       }
       list.sort((a, b) => a.name.localeCompare(b.name));
       return json(res, 200, list);
@@ -246,6 +315,60 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/api/scoreboard" && req.method === "GET") {
       return json(res, 200, buildScoreboard());
+    }
+
+    if (pathname === "/api/fetch-now" && req.method === "POST") {
+      if (fetchInProgress) {
+        return json(res, 409, { error: "a fetch cycle is already running" });
+      }
+      await refreshStationIndex();
+      await fetchAll();
+      scoreboardCache = null; // force the next /api/scoreboard to recompute
+      return json(res, 200, { ok: true, counters, locations: cfg.locations.map((l) => l.label) });
+    }
+
+    if (pathname === "/api/models" && req.method === "GET") {
+      return json(res, 200, {
+        available: openMeteo.models.map((id) => ({ id, label: openMeteo.modelLabels[id] || id })),
+        selected: cfg.models,
+      });
+    }
+
+    if (pathname === "/api/config" && req.method === "GET") {
+      return json(res, 200, {
+        vivaStationIds: cfg.vivaStationIds,
+        unresolvedVivaStationIds,
+        models: cfg.models,
+        fetchIntervalHours: cfg.fetchIntervalHours,
+        retentionDays: cfg.retentionDays,
+        verifyWindowDays: cfg.verifyWindowDays,
+      });
+    }
+
+    if (pathname === "/api/config" && req.method === "PUT") {
+      const raw = await readBody(req);
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch (e) {
+        return json(res, 400, { error: "invalid JSON" });
+      }
+      try {
+        applyConfigUpdate(body);
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+      await refreshStationIndex();
+      if (!stationTimer) stationTimer = setInterval(refreshStationIndex, 24 * 3600 * 1000);
+      saveConfig(cfg);
+      return json(res, 200, {
+        vivaStationIds: cfg.vivaStationIds,
+        unresolvedVivaStationIds,
+        models: cfg.models,
+        fetchIntervalHours: cfg.fetchIntervalHours,
+        retentionDays: cfg.retentionDays,
+        verifyWindowDays: cfg.verifyWindowDays,
+      });
     }
 
     if (pathname === "/api/observations" && req.method === "POST") {
@@ -275,25 +398,32 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-let timers = [];
+let stationTimer = null;
+let flushTimer = null;
+let pruneTimer = null;
+let fetchTimer = null;
+
+// Re-armed whenever fetchIntervalHours changes via PUT /api/config.
+function rescheduleFetchTimer() {
+  if (fetchTimer) clearInterval(fetchTimer);
+  fetchTimer = setInterval(fetchAll, cfg.fetchIntervalHours * 3600 * 1000);
+}
 
 function start() {
   if (cfg.autoDiscoverViva || cfg.vivaStationIds.length > 0) {
     refreshStationIndex();
-    timers.push(setInterval(refreshStationIndex, 24 * 3600 * 1000));
+    stationTimer = setInterval(refreshStationIndex, 24 * 3600 * 1000);
   } else if (cfg.locations.length === 0) {
     console.log("[start] no locations configured and auto-discovery is off — waiting for POST /api/observations to register one");
   }
 
-  timers.push(
-    setInterval(() => {
-      for (const label of [...buckets.keys()]) flushBucket(label, false);
-    }, 60 * 1000)
-  );
-  timers.push(setInterval(() => store.prune(cfg.retentionDays), 24 * 3600 * 1000));
+  flushTimer = setInterval(() => {
+    for (const label of [...buckets.keys()]) flushBucket(label, false);
+  }, 60 * 1000);
+  pruneTimer = setInterval(() => store.prune(cfg.retentionDays), 24 * 3600 * 1000);
 
   setTimeout(fetchAll, 60 * 1000);
-  timers.push(setInterval(fetchAll, cfg.fetchIntervalHours * 3600 * 1000));
+  rescheduleFetchTimer();
 
   server.listen(cfg.port, () => {
     console.log(`forecast-skill standalone listening on :${cfg.port} (data dir: ${cfg.dataDir})`);
@@ -302,7 +432,9 @@ function start() {
 
 function shutdown() {
   console.log("shutting down...");
-  for (const t of timers) clearInterval(t);
+  for (const t of [stationTimer, flushTimer, pruneTimer, fetchTimer]) {
+    if (t) clearInterval(t);
+  }
   for (const label of [...buckets.keys()]) flushBucket(label, true);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000).unref();

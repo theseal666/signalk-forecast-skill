@@ -31,10 +31,10 @@ async function fetchStationIndex() {
   for (const s of json.GetStationsResult.Stations) {
     if (typeof s.Lat !== "number" || typeof s.Lon !== "number") continue;
     const slug = slugify(s.Name);
-    const entry = { latitude: s.Lat, longitude: s.Lon, name: s.Name, slug };
-    if (!bySlug.has(slug)) bySlug.set(slug, entry);
     // ViVa API field name for station number: try ID then StationID
     const id = s.ID ?? s.StationID;
+    const entry = { latitude: s.Lat, longitude: s.Lon, name: s.Name, slug, id: id != null ? Number(id) : null };
+    if (!bySlug.has(slug)) bySlug.set(slug, entry);
     if (id != null) byId.set(Number(id), entry);
   }
   return { bySlug, byId };

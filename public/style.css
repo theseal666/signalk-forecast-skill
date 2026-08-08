@@ -75,6 +75,206 @@ main {
     overflow-y: auto;
 }
 
+/* ---------- settings cog + dialog ---------- */
+.icon-btn {
+    background: transparent;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #aaa;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, transform 0.2s ease;
+}
+
+.icon-btn:hover {
+    color: #fff;
+    border-color: #555;
+}
+
+.icon-btn.spin svg {
+    animation: cog-spin 0.5s ease;
+}
+
+@keyframes cog-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(90deg); }
+}
+
+.icon-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.icon-btn.spinning svg {
+    animation: full-spin 1s linear infinite;
+}
+
+@keyframes full-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+#settings-dialog {
+    background: #1a1a1a;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 0;
+    width: min(480px, 92vw);
+    max-height: 85vh;
+}
+
+#settings-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+#settings-form {
+    display: flex;
+    flex-direction: column;
+    max-height: 85vh;
+}
+
+#settings-form h2 {
+    margin: 0;
+    padding: 18px 22px;
+    font-size: 1rem;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid #262626;
+}
+
+.settings-section {
+    padding: 14px 22px;
+    border-bottom: 1px solid #232323;
+}
+
+.settings-section > label {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+.settings-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.settings-label-row label {
+    margin-bottom: 0;
+}
+
+.settings-label-row input[type="search"] {
+    background: #222;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    color: #eee;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    width: 140px;
+}
+
+.checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.checklist.scroll {
+    max-height: 220px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.checklist label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    color: #ddd;
+    cursor: pointer;
+}
+
+.checklist input[type="checkbox"] {
+    accent-color: #2fd1b0;
+}
+
+.checklist .station-id {
+    color: #666;
+    font-size: 0.75rem;
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+}
+
+.settings-grid input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: #222;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    color: #eee;
+    padding: 6px 8px;
+    font-size: 0.9rem;
+}
+
+.settings-warning {
+    color: #d9a441;
+    font-size: 0.78rem;
+    margin: 8px 0 0;
+}
+
+.settings-error {
+    color: #e0645f;
+    font-size: 0.82rem;
+    margin: 0 22px;
+    min-height: 1em;
+}
+
+.settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 22px;
+}
+
+.settings-actions button {
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border: 1px solid #3a3a3a;
+    background: #222;
+    color: #ddd;
+}
+
+#settings-save {
+    background: #1f5d4c;
+    border-color: #2f6b57;
+    color: #eafaf5;
+    font-weight: bold;
+}
+
+#settings-save:hover {
+    background: #256b58;
+}
+
+#settings-cancel:hover {
+    background: #2a2a2a;
+}
+
 #hint {
     color: #888;
     font-style: italic;
