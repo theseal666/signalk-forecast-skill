@@ -414,8 +414,12 @@ document.getElementById("force-update-btn").addEventListener("click", async () =
 
 // ---------- settings panel ----------
 let allStations = [];
+// Source of truth for which stations are checked — kept independent of the
+// DOM so filtering (which unmounts non-matching rows) can never drop a
+// previously-checked station that's just scrolled out of the current search.
+let selectedStationIdSet = new Set();
 
-function renderStationChecklist(selectedIds, filterText) {
+function renderStationChecklist(filterText) {
   const el = document.getElementById("cfg-stations");
   const q = (filterText || "").trim().toLowerCase();
   const rows = allStations.filter((s) => !q || s.name.toLowerCase().includes(q));
@@ -429,7 +433,11 @@ function renderStationChecklist(selectedIds, filterText) {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.value = s.id;
-    cb.checked = selectedIds.has(s.id);
+    cb.checked = selectedStationIdSet.has(s.id);
+    cb.addEventListener("change", () => {
+      if (cb.checked) selectedStationIdSet.add(s.id);
+      else selectedStationIdSet.delete(s.id);
+    });
     const name = document.createElement("span");
     name.textContent = s.name;
     const idSpan = document.createElement("span");
@@ -440,12 +448,6 @@ function renderStationChecklist(selectedIds, filterText) {
     label.appendChild(idSpan);
     el.appendChild(label);
   });
-}
-
-function selectedStationIds() {
-  const ids = new Set();
-  document.querySelectorAll("#cfg-stations input[type=checkbox]:checked").forEach((cb) => ids.add(Number(cb.value)));
-  return ids;
 }
 
 async function openSettings() {
@@ -481,8 +483,8 @@ async function openSettings() {
     modelsEl.appendChild(label);
   });
 
-  const selectedStations = new Set(cfg.vivaStationIds || []);
-  renderStationChecklist(selectedStations, "");
+  selectedStationIdSet = new Set(cfg.vivaStationIds || []);
+  renderStationChecklist("");
   document.getElementById("cfg-station-search").value = "";
 
   const unresolvedEl = document.getElementById("cfg-unresolved");
@@ -501,8 +503,7 @@ document.getElementById("settings-btn").addEventListener("click", () => {
 });
 
 document.getElementById("cfg-station-search").addEventListener("input", (e) => {
-  const kept = selectedStationIds();
-  renderStationChecklist(kept, e.target.value);
+  renderStationChecklist(e.target.value);
 });
 
 document.getElementById("settings-cancel").addEventListener("click", () => {
@@ -515,7 +516,7 @@ document.getElementById("settings-form").addEventListener("submit", async (e) =>
   errEl.textContent = "";
 
   const models = [...document.querySelectorAll("#cfg-models input:checked")].map((cb) => cb.value);
-  const vivaStationIds = [...selectedStationIds()];
+  const vivaStationIds = [...selectedStationIdSet];
   const fetchIntervalHours = Number(document.getElementById("cfg-interval").value);
   const retentionDays = Number(document.getElementById("cfg-retention").value);
   const verifyWindowDays = Number(document.getElementById("cfg-window").value);
