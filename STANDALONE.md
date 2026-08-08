@@ -19,6 +19,30 @@ Or with Docker:
 docker compose up -d
 ```
 
+### Keeping it running across reboots — systemd
+
+`npm start` in a terminal or background shell dies on logout/reboot. For a
+box that should just run (e.g. on the boat, or an always-on server), use
+the included user-level systemd unit — no root required, survives reboot:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/forecast-skill.service ~/.config/systemd/user/
+# edit WorkingDirectory/ExecStart in that file if your paths differ
+loginctl enable-linger "$USER"   # starts the service even before you log in
+systemctl --user daemon-reload
+systemctl --user enable --now forecast-skill.service
+```
+
+Useful commands:
+
+```bash
+systemctl --user status forecast-skill    # check it's running
+systemctl --user restart forecast-skill   # restart (config.json is only read at startup)
+journalctl --user -u forecast-skill -f    # tail live logs
+systemctl --user stop forecast-skill      # stop it
+```
+
 Config comes from `config.json` (path override via `CONFIG_FILE`), with
 `PORT` and `DATA_DIR` also settable as env vars. See `config.js` for the
 full set of fields — same names as the old plugin's config schema

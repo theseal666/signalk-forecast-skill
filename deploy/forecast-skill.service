@@ -1,0 +1,15 @@
+[Unit]
+Description=Forecast Skill (standalone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust these two paths if deploying under a different user/location.
+WorkingDirectory=/home/theseal/Documents/signalk-forecast-skill
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

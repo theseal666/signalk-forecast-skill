@@ -44,6 +44,13 @@ function modelLabel(id) {
   return (scoreboard && scoreboard.modelLabels && scoreboard.modelLabels[id]) || id;
 }
 
+// Hardcoded 24-hour HH:MM:SS — no reliance on the browser's locale/Intl support.
+function formatSwedishTime(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 function haversineNm(lat1, lon1, lat2, lon2) {
   const R = 3440.065;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -385,7 +392,7 @@ function refresh() {
     populateLocations();
     document.getElementById("metric-select").value = currentMetric;
     document.getElementById("window-info").textContent =
-      `${sb.windowDays}-day window · updated ${new Date(sb.generatedAt).toLocaleTimeString()}`;
+      `${sb.windowDays}-day window · updated ${formatSwedishTime(sb.generatedAt)}`;
     render();
   });
 }
