@@ -24,6 +24,15 @@ Fully independent of (but a good neighbor to)
 [signalk-viva](https://github.com/theseal666/signalk-viva-plugin):
 integration is via SignalK paths and HTTP only.
 
+**This `standalone` branch adds a second way to run it: a plain Node HTTP
+service (`server.js`) with no Signal K runtime involved at all**, configured
+through the webapp itself (a settings panel behind the ⚙ icon, top right) or
+`config.json`. The Signal K plugin (`index.js`) still works exactly as
+described below if you'd rather run it there. See
+[STANDALONE.md](STANDALONE.md) for the standalone-specific setup, HTTP API,
+and Docker deployment; the rest of this README (metrics, install-as-plugin,
+how the scoring works) applies to both.
+
 ## The idea in one picture
 
 ```
@@ -229,6 +238,8 @@ Only ≤ 48 h lead-time forecast hours are used (event prediction beyond 48 h is
 
 ## Installation
 
+### As a Signal K plugin
+
 ```bash
 cd ~/.signalk
 npm install https://github.com/theseal666/signalk-forecast-skill.git
@@ -238,14 +249,30 @@ sudo systemctl restart signalk
 Enable and configure the plugin in the SignalK admin UI under
 **Server → Plugin Config → Forecast Skill**.
 
+### Standalone (no Signal K)
+
+```bash
+cp config.example.json config.json
+npm start
+```
+
+Open `http://localhost:8080` — configure stations and models from the ⚙
+settings panel (no restart needed; a ↻ button next to it forces an
+immediate fetch instead of waiting for the schedule). Full details,
+Docker setup, and how observations get in without a Signal K delta bus:
+[STANDALONE.md](STANDALONE.md).
+
 ## Configuration
+
+Same settings either way — via the Signal K admin UI schema when run as a
+plugin, or the ⚙ settings panel / `config.json` when run standalone:
 
 | Setting | Default | Description |
 | :--- | :--- | :--- |
-| ViVa station numbers | — | Enter station numbers from viva.sjofartsverket.se/station/\<id\>. Plugin fetches name and coordinates automatically. |
-| Auto-discover ViVa | on | Picks up every station the signalk-viva plugin publishes. Additive — does not replace station numbers. |
-| Manual locations | — | Advanced: explicit label, lat/lon, and SignalK paths. For boat instruments or non-ViVa sources. |
-| Models | 4 Open-Meteo models | ECMWF IFS 0.25°, GFS, ICON, MET Norway Nordic |
+| ViVa station numbers | — | Enter station numbers from viva.sjofartsverket.se/station/\<id\>, or pick them by name in the standalone settings panel, which lists every station with both name and number so you can check you have the right one. Fetches name and coordinates automatically. |
+| Auto-discover ViVa | on | Plugin mode only — picks up every station the signalk-viva plugin publishes. Additive — does not replace station numbers. |
+| Manual locations | — | Advanced: explicit label, lat/lon, and (plugin mode) SignalK paths. For boat instruments or non-ViVa sources; standalone, feed these via `POST /api/observations` instead. |
+| Models | 4 Open-Meteo models | ECMWF IFS 0.25°, GFS, ICON, MET Norway Nordic (KNMI Harmonie AROME also available) |
 | Fetch interval | 3 h | How often to re-download forecasts |
 | Retention | 14 days | How long to keep archived files |
 | Verification window | 7 days | Rolling window for the scoreboard |
@@ -256,7 +283,10 @@ Enable and configure the plugin in the SignalK admin UI under
 
 ## HTTP endpoints
 
-Served under `/plugins/forecast-skill/`.
+Plugin mode serves these under `/plugins/forecast-skill/`; standalone mode
+serves them under `/api/` (see [STANDALONE.md](STANDALONE.md) for the full
+list, including `POST /api/observations`, `GET/PUT /api/config`, and
+`POST /api/fetch-now`).
 
 | Endpoint | Description |
 | :--- | :--- |
