@@ -154,15 +154,29 @@ function matchEvents(obsEvents, fcstEvents, toleranceMs) {
 const SCORE_SPEED_SCALE_MS = 5.0;
 
 // Composite score constants — calibrated for racing use.
-// Tolerances define "perfect": a hit within ±3h timing and ±15° direction
-// scores 1.0 on those components. At the tolerance boundary the score is 0.
+// ±3h is the matching window: an observed shift with a predicted shift
+// inside it counts as a catch, full stop — no partial credit for being
+// early or late within that window. Getting the shift at all is what
+// matters; how early/late it landed is reported separately (timingBiasMin),
+// not folded into the score. Magnitude still scores on a soft falloff:
+// ±15°/±1.5 m/s is "perfect", 0 at the tolerance boundary.
 const COMPOSITE_DIR_THRESHOLD_RAD = (20 * Math.PI) / 180; // ≥20° swing confirms a tactically real dir shift
 const COMPOSITE_SPD_THRESHOLD_MS = 2.0;                   // ≥2.0 m/s swing confirms spd event
-const COMPOSITE_TIMING_TOL_MS = 3 * 3600 * 1000;          // ±3h matching window + timing score
+const COMPOSITE_TIMING_TOL_MS = 3 * 3600 * 1000;          // ±3h matching window ("did it catch it")
 const COMPOSITE_DIR_TOL_DEG = 15;                         // ±15° magnitude tolerance
 const COMPOSITE_SPD_TOL_MS = 1.5;                         // ±1.5 m/s magnitude tolerance
 const COMPOSITE_MIN_OBS_EVENTS = 2;                       // refuse to score with < 2 observed events
 const COMPOSITE_MAX_LEAD_MS = 48 * 3600 * 1000;           // only score forecasts ≤ 48h lead
+
+// Mean signed timing offset over a set of matched hits, in minutes.
+// Positive = the model predicted the shift later than it actually happened
+// ("runs late" — trust it, but nudge your mental clock earlier).
+// Negative = the model called it before it actually happened ("runs early").
+function meanTimingBiasMin(hits) {
+  if (hits.length === 0) return null;
+  const sumMs = hits.reduce((s, h) => s + (h.fcst.t - h.obs.t), 0);
+  return Math.round(sumMs / hits.length / 60000);
+}
 
 // Composite score for one (location, model) pair over the verification window.
 //
@@ -174,22 +188,37 @@ const COMPOSITE_MAX_LEAD_MS = 48 * 3600 * 1000;           // only score forecast
 // product — does not collapse toward zero, so scores spread across 0–1 and
 // rank models meaningfully.
 //
+// "Timing" components score whether the shift was caught at all (any hit
+// within the ±3h window = full credit) — a shift that lands 5 minutes late
+// scores identically to one that lands bang on time. "Magnitude" components
+// still use a soft falloff. How early/late hits land on average is reported
+// separately via dirTimingBiasMin/speedTimingBiasMin, informational only.
+//
 // Component weights (renormalised over whatever data is present):
-//   0.35 — direction-event timing
+//   0.35 — direction-event timing (catch rate)
 //   0.20 — direction-event magnitude
-//   0.20 — speed-event timing
+//   0.20 — speed-event timing (catch rate)
 //   0.15 — speed-event magnitude
 //
 // Returns an object:
-//   { score, recall, precision, hits, obsEvents }
+//   { score, recall, precision, hits, obsEvents, dirTimingBiasMin, speedTimingBiasMin }
 // where recall/hits/obsEvents describe the DIRECTION shifts (used for the
 // plain-language "catches N of M shifts" summary). score is null when there
-// are not enough observed events to judge.
+// are not enough observed events to judge. *TimingBiasMin is null when there
+// are no hits to average.
 //
 // obsPts: [{t, dir (rad), speed? (m/s)}] sorted by t
 // fcstPts: [{t, dir (rad), speed? (m/s)}] — ≤48h lead, deduped by valid time (latest run wins)
 function computeComposite(obsPts, fcstPts) {
-  const NONE = { score: null, recall: null, precision: null, hits: 0, obsEvents: 0 };
+  const NONE = {
+    score: null,
+    recall: null,
+    precision: null,
+    hits: 0,
+    obsEvents: 0,
+    dirTimingBiasMin: null,
+    speedTimingBiasMin: null,
+  };
   if (obsPts.length < 5 || fcstPts.length < 5) return NONE;
 
   // Smooth observations to hourly so we score real shifts, not sensor noise.
@@ -225,6 +254,8 @@ function computeComposite(obsPts, fcstPts) {
   let dirPrecision = null;
   let dirHits = 0;
   let dirObs = 0;
+  let dirTimingBiasMin = null;
+  let speedTimingBiasMin = null;
 
   if (hasDirEvents) {
     const { hits, misses, falseAlarms } = matchEvents(
@@ -240,10 +271,10 @@ function computeComposite(obsPts, fcstPts) {
     dirPrecision = precision;
     dirHits = hits.length;
     dirObs = nObs;
-    // Timing: 0 at boundary (3h), 1 at perfect (0h)
-    applyComponent(recall, precision, hits, 0.35, (h) =>
-      Math.max(0, 1 - Math.abs(h.fcst.t - h.obs.t) / COMPOSITE_TIMING_TOL_MS)
-    );
+    dirTimingBiasMin = meanTimingBiasMin(hits);
+    // Timing: any hit within the ±3h window is a full-credit catch — being
+    // early or late inside that window doesn't reduce the score.
+    applyComponent(recall, precision, hits, 0.35, () => 1);
     // Magnitude: 0 at boundary (15°), 1 at perfect (0°)
     applyComponent(recall, precision, hits, 0.20, (h) =>
       Math.max(
@@ -263,16 +294,23 @@ function computeComposite(obsPts, fcstPts) {
     const nFcst = hits.length + falseAlarms.length;
     const recall = nObs > 0 ? hits.length / nObs : 0;
     const precision = nFcst > 0 ? hits.length / nFcst : 0;
-    applyComponent(recall, precision, hits, 0.20, (h) =>
-      Math.max(0, 1 - Math.abs(h.fcst.t - h.obs.t) / COMPOSITE_TIMING_TOL_MS)
-    );
+    speedTimingBiasMin = meanTimingBiasMin(hits);
+    applyComponent(recall, precision, hits, 0.20, () => 1);
     applyComponent(recall, precision, hits, 0.15, (h) =>
       Math.max(0, 1 - Math.abs(h.fcst.v - h.obs.v) / COMPOSITE_SPD_TOL_MS)
     );
   }
 
   const score = totalWeight > 0 ? totalScore / totalWeight : null;
-  return { score, recall: dirRecall, precision: dirPrecision, hits: dirHits, obsEvents: dirObs };
+  return {
+    score,
+    recall: dirRecall,
+    precision: dirPrecision,
+    hits: dirHits,
+    obsEvents: dirObs,
+    dirTimingBiasMin,
+    speedTimingBiasMin,
+  };
 }
 
 // Cheap stable fingerprint of a forecast's hourly payload. Two fetches whose

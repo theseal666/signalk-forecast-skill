@@ -222,15 +222,17 @@ Observations are first **smoothed to hourly** (circular mean), so event detectio
 | :--- | :--- | :--- |
 | Direction swing threshold | ≥ 20° | — |
 | Speed swing threshold | ≥ 2.0 m/s | — |
-| Timing error | — | 0 = ±3 h off, 1 = exact |
+| Timing (catch) | — | Any hit inside ±3 h = full credit. Being 5 min or 2h55m late scores identically — timing does **not** softly degrade the score. |
 | Direction magnitude error | — | 0 = ±15° off, 1 = exact |
 | Speed magnitude error | — | 0 = ±1.5 m/s off, 1 = exact |
 
 Each component score = `F1(recall, precision) × mean_hit_quality`, weighted 35 % dir-timing / 20 % dir-magnitude / 20 % speed-timing / 15 % speed-magnitude. **F1 (harmonic mean of recall and precision)** replaced an earlier `recall × precision` *product* that collapsed every model toward 0 %; F1 penalises both missed shifts and false alarms without pinning the score to zero.
 
+**Catching the shift is what's scored, not how early or late** — a hit anywhere inside the ±3 h window gets full timing credit. How early/late it actually landed is reported separately as `dirTimingBiasMin` / `speedTimingBiasMin` (average minutes, signed: positive = the model calls the shift *later* than it really happens — "runs late"; negative = "runs early"), surfaced in the webapp ranking as e.g. *"runs ~38min late"*. This is informational only and never affects the score — the reasoning: a model that reliably catches shifts but is consistently ~40 min behind is still tactically useful once you know to mentally shift its clock; that shouldn't score worse than one that's dead-on but flakier about catching shifts at all.
+
 Only ≤ 48 h lead-time forecast hours are used (event prediction beyond 48 h is speculative).
 
-**In the webapp** the blended percentage is deliberately not shown as the headline — instead each model reports the plain, interpretable **"catches N of M shifts."** The raw counts are what a tactician actually wants.
+**In the webapp** the blended percentage is deliberately not shown as the headline — instead each model reports the plain, interpretable **"catches N of M shifts"** plus its timing lean. The raw counts (and the lean) are what a tactician actually wants.
 
 **What to watch:** the composite needs a few days of actual wind-shift events to mean anything. In steady high pressure it will show few shifts to judge — correct, since there is nothing to score against.
 

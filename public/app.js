@@ -105,6 +105,7 @@ function summarize(model) {
     hits: comp.hits || 0,
     obsEvents: comp.obsEvents || 0,
     catchRate,
+    timingBiasMin: comp.dirTimingBiasMin,
     skillCross,
   };
 }
@@ -125,6 +126,18 @@ function biasPhrase(bias) {
   const n = Math.round(bias);
   if (n === 0) return "no steady bias";
   return `reads ${n > 0 ? "+" : ""}${n}° (${n > 0 ? "right" : "left"})`;
+}
+
+// timingBiasMin > 0 means the model predicts shifts later than they actually
+// happen ("runs late"); < 0 means it calls them before they happen ("runs
+// early"). Catching the shift at all is what's scored — this is purely
+// informational, so you know which way to mentally nudge the clock.
+function timingPhrase(timingBiasMin) {
+  if (timingBiasMin == null) return "";
+  if (Math.abs(timingBiasMin) < 5) return "right on time";
+  const mins = Math.abs(timingBiasMin);
+  const unit = mins >= 60 ? `${(mins / 60).toFixed(1)}h` : `${mins}min`;
+  return `runs ~${unit} ${timingBiasMin > 0 ? "late" : "early"}`;
 }
 
 // ---------- Q2: recommendation ----------
@@ -187,7 +200,12 @@ function renderRanking(loc, summaries) {
     }
     if (s.obsEvents > 0) {
       parts.push(
-        `<span title="Of the ${s.obsEvents} tactically real wind shifts (≥20°, hourly-smoothed) observed this week, how many the model predicted within 3 h.">catches ${s.hits}/${s.obsEvents} shifts</span>`
+        `<span title="Of the ${s.obsEvents} tactically real wind shifts (≥20°, hourly-smoothed) observed this week, how many the model predicted within 3 h. Catching it counts fully regardless of how early or late within that window.">catches ${s.hits}/${s.obsEvents} shifts</span>`
+      );
+    }
+    if (s.hits > 0 && s.timingBiasMin != null) {
+      parts.push(
+        `<span title="Average gap between predicted and actual shift time, across the ${s.hits} shifts it caught. Doesn't affect the score above — purely so you know which way to nudge the clock.">${timingPhrase(s.timingBiasMin)}</span>`
       );
     }
     parts.push(

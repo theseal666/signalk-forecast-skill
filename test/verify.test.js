@@ -128,7 +128,7 @@ test("computeComposite returns a shift-catch object; empty input is well-formed"
   // A model that perfectly reproduces the observed series should score > 0 and
   // catch every observed shift (recall = 1).
   const H = 3600 * 1000;
-  const t0 = 1_000_000_000_000;
+  const t0 = Math.floor(1_000_000_000_000 / H) * H; // hour-aligned, so obs smoothing (bins to the hour) doesn't shift it
   const pts = [];
   for (let i = 0; i < 40; i++) {
     // a slow triangle wave that crosses the 20° threshold several times
@@ -141,4 +141,53 @@ test("computeComposite returns a shift-catch object; empty input is well-formed"
   assert.ok(c.obsEvents >= 2, "detected real shifts");
   assert.strictEqual(c.hits, c.obsEvents, "perfect forecast catches them all");
   assert.ok(c.score > 0.5, "perfect forecast scores well above zero");
+  assert.strictEqual(c.dirTimingBiasMin, 0, "zero offset when forecast and observed times match exactly");
+});
+
+test("computeComposite: a late-but-caught shift scores identically to an on-time one, and reports the lag", () => {
+  const H = 3600 * 1000;
+  const t0 = Math.floor(1_000_000_000_000 / H) * H; // hour-aligned, so obs smoothing (bins to the hour) doesn't shift it
+  const pts = [];
+  for (let i = 0; i < 40; i++) {
+    const phase = Math.sin(i / 3) * deg(35);
+    pts.push({ t: t0 + i * H, dir: phase < 0 ? phase + 2 * Math.PI : phase, speed: 5 });
+  }
+  const obs = pts.map((p) => ({ ...p }));
+  const onTimeFcst = pts.map((p) => ({ ...p }));
+  // Same shape and magnitude, but every predicted shift lands 1h after the
+  // real one — well inside the ±3h matching window, so it still counts as
+  // caught. The composite score should not be penalized for this at all;
+  // only dirTimingBiasMin should reflect the 1h lag.
+  const lateFcst = pts.map((p) => ({ ...p, t: p.t + H }));
+
+  const onTime = computeComposite(obs, onTimeFcst);
+  const late = computeComposite(obs, lateFcst);
+
+  assert.strictEqual(late.hits, late.obsEvents, "still catches every shift despite the 1h lag");
+  assert.strictEqual(
+    late.score,
+    onTime.score,
+    "a 1h-late catch scores exactly the same as an on-time catch — timing is informational, not penalized"
+  );
+  assert.strictEqual(late.dirTimingBiasMin, 60, "reports the model as running ~60min late");
+  assert.strictEqual(onTime.dirTimingBiasMin, 0);
+});
+
+test("computeComposite: a shift caught late scores fully even near the 3h matching boundary", () => {
+  const H = 3600 * 1000;
+  const t0 = Math.floor(2_000_000_000_000 / H) * H; // hour-aligned, so obs smoothing (bins to the hour) doesn't shift it
+  const pts = [];
+  for (let i = 0; i < 40; i++) {
+    const phase = Math.sin(i / 3) * deg(35);
+    pts.push({ t: t0 + i * H, dir: phase < 0 ? phase + 2 * Math.PI : phase, speed: 5 });
+  }
+  const obs = pts.map((p) => ({ ...p }));
+  // 2h55m late — inside the window, should still be full timing credit.
+  const nearBoundaryFcst = pts.map((p) => ({ ...p, t: p.t + 2.9167 * H }));
+  const onTime = pts.map((p) => ({ ...p }));
+
+  const c = computeComposite(obs, nearBoundaryFcst);
+  const perfect = computeComposite(obs, onTime);
+  assert.strictEqual(c.hits, c.obsEvents, "still caught, even close to the tolerance boundary");
+  assert.strictEqual(c.score, perfect.score, "no falloff for being close to the matching boundary");
 });
