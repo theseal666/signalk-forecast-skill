@@ -51,6 +51,27 @@ function formatSwedishTime(ms) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// Hardcoded DD/MM — no reliance on the browser's locale/Intl support.
+function formatSwedishDate(ms) {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+}
+
+// Fixed markers at local midnight (00:00) and noon (12:00) within
+// [windowStart, windowEnd] — aligned to the clock, not offset from
+// windowStart, so they land on real day/half-day boundaries.
+function halfDayTicks(windowStart, windowEnd) {
+  const first = new Date(windowStart);
+  first.setMinutes(0, 0, 0);
+  first.setHours(first.getHours() - (first.getHours() % 12));
+  const ticks = [];
+  for (let t = first.getTime(); t <= windowEnd; t += 12 * 3600000) {
+    if (t >= windowStart) ticks.push(t);
+  }
+  return ticks;
+}
+
 function haversineNm(lat1, lon1, lat2, lon2) {
   const R = 3440.065;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -499,14 +520,22 @@ function renderTrackChart(svgId, scrollId, data, accessor, opts) {
     svg.appendChild(label);
   }
 
-  // x-axis hour ticks
-  const tickEveryH = totalHours > 60 ? 12 : 6;
-  for (let h = 0; h <= totalHours; h += tickEveryH) {
-    const t = windowStart + h * 3600000;
+  // x-axis: fixed markers at local midnight and noon, not offset from windowStart
+  for (const t of halfDayTicks(windowStart, windowEnd)) {
     const gx = x(t);
-    svg.appendChild(el("line", { x1: gx, x2: gx, y1: TRACK_MARGIN.top, y2: height - TRACK_MARGIN.bottom, stroke: "#1e1e1e", "stroke-width": 1 }));
-    const label = el("text", { x: gx, y: height - 8, fill: "#666", "font-size": 10, "text-anchor": "middle" });
-    label.textContent = new Date(t).toLocaleString("sv-SE", { day: "2-digit", month: "2-digit" }).slice(0, 5) + " " + formatSwedishTime(t).slice(0, 5);
+    const isMidnight = new Date(t).getHours() === 0;
+    svg.appendChild(
+      el("line", {
+        x1: gx,
+        x2: gx,
+        y1: TRACK_MARGIN.top,
+        y2: height - TRACK_MARGIN.bottom,
+        stroke: isMidnight ? "#333" : "#1e1e1e",
+        "stroke-width": isMidnight ? 1.5 : 1,
+      })
+    );
+    const label = el("text", { x: gx, y: height - 8, fill: isMidnight ? "#888" : "#666", "font-size": 10, "text-anchor": "middle" });
+    label.textContent = isMidnight ? formatSwedishDate(t) : "12:00";
     svg.appendChild(label);
   }
 
