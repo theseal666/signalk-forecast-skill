@@ -50,6 +50,56 @@ full set of fields — same names as the old plugin's config schema
 `fetchIntervalHours`, `retentionDays`, `verifyWindowDays`), plus `port` and
 `dataDir`.
 
+### Remote access from the boat — Cloudflare Tunnel + Access
+
+**There is no authentication built into the app itself** — the settings
+panel, `POST /api/observations`, and `POST /api/fetch-now` are all open on
+the local network. Never expose port 8080 directly to the internet.
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+gives a public HTTPS hostname with no port-forwarding, and
+[Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+puts a login wall in front of it — set both up together, never the tunnel
+alone.
+
+```bash
+# 1. Install (user-space, no root)
+mkdir -p ~/.local/bin
+curl -L -o ~/.local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+chmod +x ~/.local/bin/cloudflared
+
+# 2. Authorize against your Cloudflare account (opens a browser link)
+cloudflared tunnel login
+
+# 3. Create the tunnel and DNS route
+cloudflared tunnel create forecast-skill
+cloudflared tunnel route dns forecast-skill forecast.yourdomain.example
+
+# 4. Configure — copy the template and fill in your tunnel ID/hostname
+mkdir -p ~/.cloudflared
+cp deploy/cloudflared-config.yml.example ~/.cloudflared/config.yml
+# edit ~/.cloudflared/config.yml: tunnel id, credentials-file path, hostname
+
+# 5. Run it as a systemd user service (survives reboot, same pattern as forecast-skill)
+cp deploy/cloudflared-forecast-skill.service.example ~/.config/systemd/user/cloudflared-forecast-skill.service
+# edit that file if your username/paths differ from the %h defaults
+systemctl --user daemon-reload
+systemctl --user enable --now cloudflared-forecast-skill.service
+```
+
+**Before leaving it running**, go to the
+[Zero Trust dashboard](https://one.dash.cloudflare.com/) → **Access →
+Applications → Add an application → Self-hosted**, set the domain to your
+tunnel hostname, and add a policy (e.g. "Include → Emails" → your own
+email — gates it behind a one-time-PIN, no password to manage). Verify it's
+actually gated before trusting it:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://forecast.yourdomain.example/api/status
+# should redirect through a Cloudflare Access login page, not return your data directly
+```
+
+If you ever need to take it offline quickly: `systemctl --user stop cloudflared-forecast-skill`.
+
 ## HTTP API
 
 Same shapes as the plugin, mounted at `/api/*` instead of

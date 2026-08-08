@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare Tunnel (forecast-skill)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust paths/tunnel name to match your setup (see STANDALONE.md).
+ExecStart=%h/.local/bin/cloudflared tunnel --config %h/.cloudflared/config.yml run forecast-skill
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
