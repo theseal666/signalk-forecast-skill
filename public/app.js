@@ -30,7 +30,7 @@ const METRIC_META = {
 };
 
 function fetchScoreboard() {
-  return fetch("/plugins/forecast-skill/scoreboard")
+  return fetch("/api/scoreboard")
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
 }

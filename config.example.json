@@ -1,0 +1,14 @@
+{
+  "port": 8080,
+  "dataDir": "./data",
+
+  "vivaStationIds": [2113, 204, 2108],
+  "autoDiscoverViva": false,
+
+  "locations": [],
+
+  "models": ["ecmwf_ifs025", "gfs_seamless", "metno_seamless", "icon_seamless"],
+  "fetchIntervalHours": 3,
+  "retentionDays": 14,
+  "verifyWindowDays": 7
+}
