@@ -541,6 +541,56 @@ function computeScoreboard({ forecasts, observations, now, windowDays }) {
   return { generatedAt: now, windowDays, buckets: BUCKETS, locations };
 }
 
+// Per-model forecast track + observed track for one location, for the
+// spaghetti/scroll chart: observed stops at `now` (can't observe the
+// future); each model's forecast line continues into the future from its
+// latest run. Past portion uses the same freshest-run-wins dedup as the
+// scoreboard, so the line matches what verification actually scored against
+// — not just the single oldest run's stale prediction.
+//
+// Returns { location, generatedAt, windowStart, windowEnd,
+//           observed: [{t, dir, speed}], models: { <model>: [{t, dir, speed}] } }
+function buildCurves({ forecasts, observations, location, now, pastHours, futureHours }) {
+  const windowStart = now - pastHours * 3600000;
+  const windowEnd = now + futureHours * 3600000;
+
+  const runs = attributeRunTimes(forecasts.filter((f) => f.location === location));
+
+  // model -> Map<validTime, {t, dir, speed, runTime}> — freshest run wins per valid time.
+  const series = new Map();
+  for (const run of runs) {
+    const runTime = run._runTime != null ? run._runTime : run.runTime;
+    if (!series.has(run.model)) series.set(run.model, new Map());
+    const m = series.get(run.model);
+    for (const h of run.hours) {
+      if (h.t < windowStart || h.t > windowEnd) continue;
+      const existing = m.get(h.t);
+      if (!existing || runTime > existing.runTime) {
+        m.set(h.t, {
+          t: h.t,
+          dir: h.dir,
+          speed: typeof h.speed === "number" ? h.speed : null,
+          runTime,
+        });
+      }
+    }
+  }
+
+  const models = {};
+  for (const [model, m] of series) {
+    models[model] = [...m.values()]
+      .sort((a, b) => a.t - b.t)
+      .map((p) => ({ t: p.t, dir: p.dir, speed: p.speed }));
+  }
+
+  const observed = observations
+    .filter((o) => o.location === location && o.t >= windowStart && o.t <= now && typeof o.dir === "number")
+    .map((o) => ({ t: o.t, dir: o.dir, speed: typeof o.speed === "number" ? o.speed : null }))
+    .sort((a, b) => a.t - b.t);
+
+  return { location, generatedAt: now, windowStart, windowEnd, observed, models };
+}
+
 module.exports = {
   normalize,
   normalize2pi,
@@ -556,4 +606,5 @@ module.exports = {
   fingerprintHours,
   attributeRunTimes,
   computeScoreboard,
+  buildCurves,
 };

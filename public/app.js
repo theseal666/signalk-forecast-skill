@@ -367,6 +367,265 @@ function renderDetail() {
   });
 }
 
+// ---------- forecast track charts (direction + speed over time) ----------
+const TRACK_PAST_HOURS = 48;
+const TRACK_FUTURE_HOURS = 48;
+const TRACK_PX_PER_HOUR = 12;
+const TRACK_HEIGHT = 220;
+const TRACK_MARGIN = { top: 14, right: 16, bottom: 24, left: 44 };
+const OBSERVED_COLOR = "#eee";
+
+const MODEL_COLORS = {
+  ecmwf_ifs025: "#4fc3f7",
+  gfs_seamless: "#ffb74d",
+  icon_seamless: "#ba68c8",
+  metno_seamless: "#81c784",
+  knmi_harmonie_arome_europe: "#f06292",
+};
+
+function colorForModel(id) {
+  if (MODEL_COLORS[id]) return MODEL_COLORS[id];
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360}, 65%, 62%)`;
+}
+
+// Unwrap a direction series (radians) to a continuous line, no 360°/0° jump.
+function unwrapSeries(pts) {
+  if (pts.length === 0) return [];
+  const out = [{ t: pts[0].t, v: pts[0].v }];
+  for (let i = 1; i < pts.length; i++) {
+    let diff = pts[i].v - pts[i - 1].v;
+    while (diff > Math.PI) diff -= 2 * Math.PI;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    out.push({ t: pts[i].t, v: out[i - 1].v + diff });
+  }
+  return out;
+}
+
+let tracksData = null; // last /api/curves response
+let tracksRequestId = 0;
+
+function fetchCurves(location) {
+  return fetch(`/api/curves?location=${encodeURIComponent(location)}&pastHours=${TRACK_PAST_HOURS}&futureHours=${TRACK_FUTURE_HOURS}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+}
+
+function renderTracksLegend() {
+  const el = document.getElementById("tracks-legend");
+  el.innerHTML = "";
+  const items = [{ label: "Observed", color: OBSERVED_COLOR, dashed: false }];
+  if (tracksData) {
+    for (const model of Object.keys(tracksData.models)) {
+      items.push({ label: modelLabel(model), color: colorForModel(model), dashed: true });
+    }
+  }
+  items.forEach((it) => {
+    const div = document.createElement("div");
+    div.className = "legend-item";
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.borderTopColor = it.color;
+    sw.style.borderTopStyle = it.dashed ? "dashed" : "solid";
+    div.appendChild(sw);
+    const label = document.createElement("span");
+    label.textContent = it.label;
+    div.appendChild(label);
+    el.appendChild(div);
+  });
+}
+
+// Generic time-series line chart. accessor(pt) -> value or null. isAngle
+// unwraps each series independently before scaling (shared Y axis after).
+function renderTrackChart(svgId, scrollId, data, accessor, opts) {
+  const svg = document.getElementById(svgId);
+  const scroll = document.getElementById(scrollId);
+  svg.innerHTML = "";
+  if (!data) return;
+
+  const { windowStart, windowEnd, observed, models, generatedAt } = data;
+  const totalHours = (windowEnd - windowStart) / 3600000;
+  const wrapperWidth = scroll.clientWidth || 600;
+  const width = Math.max(wrapperWidth, Math.round(totalHours * TRACK_PX_PER_HOUR));
+  const height = TRACK_HEIGHT;
+  const plotW = width - TRACK_MARGIN.left - TRACK_MARGIN.right;
+  const plotH = height - TRACK_MARGIN.top - TRACK_MARGIN.bottom;
+
+  const toPts = (arr) =>
+    arr.map((p) => ({ t: p.t, v: accessor(p) })).filter((p) => p.v != null);
+
+  let obsPts = toPts(observed);
+  const modelPts = {};
+  for (const [m, arr] of Object.entries(models)) modelPts[m] = toPts(arr);
+
+  if (opts.isAngle) {
+    obsPts = unwrapSeries(obsPts);
+    for (const m of Object.keys(modelPts)) modelPts[m] = unwrapSeries(modelPts[m]);
+  }
+
+  const allVals = [...obsPts, ...Object.values(modelPts).flat()].map((p) => p.v);
+  let yMin = allVals.length ? Math.min(...allVals) : 0;
+  let yMax = allVals.length ? Math.max(...allVals) : 1;
+  if (opts.yMin != null) yMin = Math.min(yMin, opts.yMin);
+  if (opts.yMax != null) yMax = Math.max(yMax, opts.yMax);
+  const pad = (yMax - yMin) * 0.1 || 1;
+  yMin -= pad;
+  yMax += pad;
+
+  const x = (t) => TRACK_MARGIN.left + ((t - windowStart) / (windowEnd - windowStart)) * plotW;
+  const y = (v) => TRACK_MARGIN.top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    return e;
+  };
+
+  svg.setAttribute("width", width);
+  svg.setAttribute("height", height);
+
+  // grid + y-axis labels
+  const gridLines = 4;
+  for (let i = 0; i <= gridLines; i++) {
+    const v = yMin + ((yMax - yMin) * i) / gridLines;
+    const gy = y(v);
+    svg.appendChild(
+      el("line", { x1: TRACK_MARGIN.left, x2: width - TRACK_MARGIN.right, y1: gy, y2: gy, stroke: "#262626", "stroke-width": 1 })
+    );
+    const label = el("text", { x: TRACK_MARGIN.left - 8, y: gy + 4, fill: "#666", "font-size": 10, "text-anchor": "end" });
+    label.textContent = opts.formatY ? opts.formatY(v) : Math.round(v);
+    svg.appendChild(label);
+  }
+
+  // x-axis hour ticks
+  const tickEveryH = totalHours > 60 ? 12 : 6;
+  for (let h = 0; h <= totalHours; h += tickEveryH) {
+    const t = windowStart + h * 3600000;
+    const gx = x(t);
+    svg.appendChild(el("line", { x1: gx, x2: gx, y1: TRACK_MARGIN.top, y2: height - TRACK_MARGIN.bottom, stroke: "#1e1e1e", "stroke-width": 1 }));
+    const label = el("text", { x: gx, y: height - 8, fill: "#666", "font-size": 10, "text-anchor": "middle" });
+    label.textContent = new Date(t).toLocaleString("sv-SE", { day: "2-digit", month: "2-digit" }).slice(0, 5) + " " + formatSwedishTime(t).slice(0, 5);
+    svg.appendChild(label);
+  }
+
+  // "now" marker
+  const nowX = x(generatedAt);
+  svg.appendChild(el("line", { x1: nowX, x2: nowX, y1: TRACK_MARGIN.top, y2: height - TRACK_MARGIN.bottom, stroke: "#555", "stroke-width": 1.5, "stroke-dasharray": "3,3" }));
+  const nowLabel = el("text", { x: nowX + 4, y: TRACK_MARGIN.top + 10, fill: "#888", "font-size": 10 });
+  nowLabel.textContent = "now";
+  svg.appendChild(nowLabel);
+
+  const pathFor = (pts) => pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+
+  if (obsPts.length > 1) {
+    svg.appendChild(el("path", { d: pathFor(obsPts), fill: "none", stroke: OBSERVED_COLOR, "stroke-width": 2.5, "stroke-linejoin": "round" }));
+  }
+  for (const [m, pts] of Object.entries(modelPts)) {
+    if (pts.length < 2) continue;
+    svg.appendChild(
+      el("path", {
+        d: pathFor(pts),
+        fill: "none",
+        stroke: colorForModel(m),
+        "stroke-width": 1.6,
+        "stroke-dasharray": "5,4",
+        "stroke-linejoin": "round",
+      })
+    );
+  }
+
+  // hover: vertical guide + tooltip
+  scroll.style.position = "relative";
+  let tooltip = scroll.querySelector(".track-tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.className = "track-tooltip";
+    tooltip.style.display = "none";
+    scroll.appendChild(tooltip);
+  }
+  const guide = el("line", { y1: TRACK_MARGIN.top, y2: height - TRACK_MARGIN.bottom, stroke: "#888", "stroke-width": 1, visibility: "hidden" });
+  svg.appendChild(guide);
+
+  const overlay = el("rect", {
+    x: TRACK_MARGIN.left,
+    y: TRACK_MARGIN.top,
+    width: plotW,
+    height: plotH,
+    fill: "transparent",
+  });
+  overlay.addEventListener("mousemove", (e) => {
+    const rect = svg.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const t = windowStart + ((px - TRACK_MARGIN.left) / plotW) * (windowEnd - windowStart);
+    guide.setAttribute("x1", px);
+    guide.setAttribute("x2", px);
+    guide.setAttribute("visibility", "visible");
+
+    const nearest = (pts) => {
+      if (!pts.length) return null;
+      let best = pts[0];
+      for (const p of pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+      return Math.abs(best.t - t) <= 1.5 * 3600000 ? best : null;
+    };
+
+    const rows = [];
+    const ob = nearest(obsPts);
+    if (ob) rows.push({ label: "Observed", color: OBSERVED_COLOR, v: ob.v, t: ob.t });
+    for (const [m, pts] of Object.entries(modelPts)) {
+      const mp = nearest(pts);
+      if (mp) rows.push({ label: modelLabel(m), color: colorForModel(m), v: mp.v, t: mp.t });
+    }
+    if (rows.length === 0) {
+      tooltip.style.display = "none";
+      return;
+    }
+    const fmt = opts.formatTooltip || ((v) => v.toFixed(1));
+    tooltip.innerHTML =
+      `<div class="tt-time">${new Date(t).toLocaleString("sv-SE")}</div>` +
+      rows
+        .map(
+          (r) =>
+            `<div class="tt-row"><span class="tt-swatch" style="background:${r.color}"></span>${r.label}: ${fmt(r.v)}</div>`
+        )
+        .join("");
+    tooltip.style.display = "block";
+    const left = Math.min(px + 12, width - 180);
+    tooltip.style.left = left + "px";
+    tooltip.style.top = "8px";
+  });
+  overlay.addEventListener("mouseleave", () => {
+    guide.setAttribute("visibility", "hidden");
+    tooltip.style.display = "none";
+  });
+  svg.appendChild(overlay);
+}
+
+function renderTracks() {
+  if (!currentLocation) return;
+  const myRequest = ++tracksRequestId;
+  fetchCurves(currentLocation).then((data) => {
+    if (myRequest !== tracksRequestId) return; // location changed while in flight
+    tracksData = data;
+    renderTracksLegend();
+    renderTrackChart("track-svg-dir", "track-scroll-dir", data, (p) => p.dir, {
+      isAngle: true,
+      formatY: (v) => Math.round(((v * 180) / Math.PI) % 360 < 0 ? ((v * 180) / Math.PI) % 360 + 360 : ((v * 180) / Math.PI) % 360) + "°",
+      formatTooltip: (v) => {
+        const deg = ((v * 180) / Math.PI) % 360;
+        return Math.round(deg < 0 ? deg + 360 : deg) + "°";
+      },
+    });
+    renderTrackChart("track-svg-speed", "track-scroll-speed", data, (p) => p.speed, {
+      isAngle: false,
+      yMin: 0,
+      formatY: (v) => v.toFixed(0),
+      formatTooltip: (v) => v.toFixed(1) + " m/s",
+    });
+  });
+}
+
 function render() {
   const loc = locationEntry();
   if (!scoreboard || !loc) return;
@@ -375,6 +634,7 @@ function render() {
   renderRanking(loc, summaries);
   renderHorizon(loc);
   renderDetail();
+  renderTracks();
 }
 
 function populateLocations() {

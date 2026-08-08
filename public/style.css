@@ -606,3 +606,98 @@ main {
 .detail-body {
     padding-top: 16px;
 }
+
+/* ---------- forecast track charts ---------- */
+#tracks-panel {
+    margin-top: 10px;
+    border-top: 1px solid #262626;
+    padding-top: 12px;
+}
+
+#tracks-panel summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7a8f88;
+    padding: 6px 0;
+}
+
+#tracks-panel summary:hover {
+    color: #aac4bc;
+}
+
+.tracks-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 10px 0 16px;
+    font-size: 0.78rem;
+    color: #bbb;
+}
+
+.tracks-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tracks-legend .swatch {
+    width: 18px;
+    height: 0;
+    border-top-width: 2px;
+    border-top-style: solid;
+    display: inline-block;
+}
+
+.track-chart-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #777;
+    margin: 18px 0 6px;
+}
+
+.track-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: #161616;
+    border: 1px solid #262626;
+    border-radius: 8px;
+}
+
+.track-scroll svg {
+    display: block;
+}
+
+.track-tooltip {
+    position: absolute;
+    background: #1e1e1e;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.75rem;
+    color: #ddd;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.track-tooltip .tt-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.track-tooltip .tt-swatch {
+    width: 10px;
+    height: 2px;
+    display: inline-block;
+}
+
+.track-tooltip .tt-time {
+    color: #888;
+    font-size: 0.7rem;
+    margin-bottom: 4px;
+}

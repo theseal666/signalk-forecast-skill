@@ -10,7 +10,7 @@ const path = require("path");
 const { loadConfig, saveConfig } = require("./config.js");
 const createStore = require("./store.js");
 const openMeteo = require("./providers/openMeteo.js");
-const { circularMeanFromSums, computeScoreboard } = require("./verify.js");
+const { circularMeanFromSums, computeScoreboard, buildCurves } = require("./verify.js");
 const { fetchStationIndex, fetchStationWind } = require("./vivaLocations.js");
 
 const PROVIDERS = [openMeteo];
@@ -304,7 +304,7 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+  const { pathname, searchParams } = new URL(req.url, `http://${req.headers.host}`);
 
   try {
     if (pathname === "/api/status" && req.method === "GET") {
@@ -332,6 +332,20 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/api/scoreboard" && req.method === "GET") {
       return json(res, 200, buildScoreboard());
+    }
+
+    if (pathname === "/api/curves" && req.method === "GET") {
+      const location = searchParams.get("location");
+      if (!location) return json(res, 400, { error: "location query param required" });
+      const pastHours = Math.max(1, Number(searchParams.get("pastHours")) || 48);
+      const futureHours = Math.max(1, Number(searchParams.get("futureHours")) || 48);
+      const now = Date.now();
+      const windowStart = now - pastHours * 3600000;
+      // Extra lookback so runs fetched before windowStart, whose hours[] still
+      // reach into the window, aren't missed (provider gives ~8 days per run).
+      const forecasts = store.readSince("forecasts", windowStart - 8 * 86400000);
+      const observations = store.readSince("observations", windowStart);
+      return json(res, 200, buildCurves({ forecasts, observations, location, now, pastHours, futureHours }));
     }
 
     if (pathname === "/api/fetch-now" && req.method === "POST") {

@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Forecast Skill</title>
-    <link rel="stylesheet" href="style.css?v=0.7.5">
+    <link rel="stylesheet" href="style.css?v=0.8.0">
 </head>
 <body>
     <div id="dashboard">
         <header>
             <div class="brand">
-                <img src="icon.png?v=0.7.5" alt="Forecast Skill">
+                <img src="icon.png?v=0.8.0" alt="Forecast Skill">
                 <span>FORECAST&nbsp;SKILL</span>
             </div>
             <div class="control">
@@ -46,6 +46,22 @@
                 <span class="section-note">— who is best now vs. later. If it flips, that is your reason to switch.</span>
             </div>
             <div id="horizon"></div>
+
+            <!-- forecast tracks: past observed + forecast, continuing into the future -->
+            <details id="tracks-panel" open>
+                <summary>Forecast tracks — direction &amp; speed over time</summary>
+                <div class="detail-body">
+                    <p class="section-note">
+                        Solid white = observed (stops at “now”). Dotted colored lines = each
+                        model's forecast, continuing into the future. Scroll horizontally.
+                    </p>
+                    <div id="tracks-legend" class="tracks-legend"></div>
+                    <div class="track-chart-title">Direction (°T)</div>
+                    <div class="track-scroll" id="track-scroll-dir"><svg id="track-svg-dir"></svg></div>
+                    <div class="track-chart-title">Speed (m/s)</div>
+                    <div class="track-scroll" id="track-scroll-speed"><svg id="track-svg-speed"></svg></div>
+                </div>
+            </details>
 
             <!-- power-user detail -->
             <details id="detail-panel">
@@ -112,6 +128,6 @@
         </form>
     </dialog>
 
-    <script src="app.js?v=0.7.5"></script>
+    <script src="app.js?v=0.8.0"></script>
 </body>
 </html>
