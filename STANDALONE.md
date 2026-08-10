@@ -106,51 +106,60 @@ Same shapes as the plugin, mounted at `/api/*` instead of
 `/plugins/forecast-skill/*`:
 
 - `GET /api/status`
-- `GET /api/stations` — ViVa station index (name/lat/lon), populated once
+- `GET /api/stations` — ViVa station index (name/id/lat/lon), populated once
   `vivaStationIds` or `autoDiscoverViva` triggers a station-list fetch.
 - `GET /api/scoreboard`
+- `GET /api/curves?location=&pastHours=&futureHours=` — new; per-model
+  forecast track + observed track for the scroll charts. Defaults to 48h
+  past / 48h future. Observed stops at "now"; each model's line continues
+  into the future from its latest run.
+- `GET /api/models` — new; available Open-Meteo models + currently selected.
+- `GET /api/config` / `PUT /api/config` — new; read/update
+  `vivaStationIds`, `models`, `fetchIntervalHours`, `retentionDays`,
+  `verifyWindowDays` live, without restarting. Backs the ⚙ settings panel.
+- `POST /api/fetch-now` — new; triggers an immediate station-index refresh +
+  forecast fetch + ViVa observation poll instead of waiting for the
+  schedule. Backs the ↻ force-update button.
 - `POST /api/observations` — new; see below.
 
 The webapp (`public/`) is served as static files at `/`.
 
 ## Feeding it observations
 
-The plugin used to read wind observations off the Signal K delta bus (paths
-like `environment.observations.viva.<slug>.wind.directionTrue`), which were
-put there by the separate `signalk-viva` plugin polling ViVa's live-data
-service. Standalone, there is no delta bus, so observations need a direct
-path in:
+**ViVa stations (`vivaStationIds`) are self-sufficient — no Signal K
+needed.** `vivaLocations.js`'s `fetchStationWind()` polls each ViVa-sourced
+station's live endpoint directly (same host as the station list, one call
+per station ID) every 60s, matching `signalk-viva`'s own conventions
+exactly (`Medelvind` = average wind sample, direction from `Heading` in
+degrees). This closed what used to be an open gap: the plugin got
+observations for free off the Signal K delta bus via `signalk-viva`;
+standalone, `pollVivaObservations()` in `server.js` does the equivalent
+directly, feeding the same bucket/archive pipeline. Nothing to configure —
+add a station via `vivaStationIds` (or the ⚙ settings panel) and its
+observations start flowing automatically, alongside its forecasts.
+
+For anything that *isn't* a ViVa station — boat instruments, an NMEA
+gateway, a non-ViVa buoy — there's a generic push endpoint:
 
 ```
 POST /api/observations
 Content-Type: application/json
 
-{ "location": "vinga", "dirDeg": 245, "speedMs": 8.2 }
+{ "location": "myboat", "dirDeg": 245, "speedMs": 8.2 }
 ```
 
 `dirDeg` is degrees true, `speedMs` is optional. If `location` isn't already
-known, include `latitude`/`longitude` to auto-register it (mirrors the old
-auto-discovery behavior) — otherwise the request is rejected so a typo
-doesn't silently create a bogus station.
+known, include `latitude`/`longitude` to auto-register it — otherwise the
+request is rejected so a typo doesn't silently create a bogus station.
+Point any forwarding script at it, once every few minutes per location, and
+forecast verification works exactly as before.
 
-This is deliberately generic: point any boat-instrument bridge, NMEA
-gateway, or small forwarding script at it, once every few minutes per
-location, and forecast verification works exactly as before.
-
-**Open item — ViVa live data isn't wired up directly yet.**
-`vivaLocations.js` only calls ViVa's *station list* endpoint (name/lat/lon);
-the actual live wind readings came via `signalk-viva`, whose polling
-endpoint isn't in this repo. Two ways to close that gap, neither done here:
-
-1. Find `signalk-viva`'s live-data endpoint and add a
-   `providers`-style poller that calls `POST /api/observations` internally
-   on the same cadence — makes standalone mode fully self-sufficient for
-   ViVa stations again.
-2. If you still run Signal K (with `signalk-viva`) somewhere, bridge it: a
-   ~20-line script that opens `ws://<signalk-host>/signalk/v1/stream`,
-   subscribes to the wind paths, and forwards each value to
-   `POST /api/observations`. Keeps Signal K only as one optional data
-   *source*, not a runtime dependency of this service.
+If you still run Signal K (e.g. with `signalk-viva`) somewhere and want to
+use *that* as a source instead — for boat instruments already publishing to
+a Signal K server — bridge it: a small script that opens
+`ws://<signalk-host>/signalk/v1/stream`, subscribes to the wind paths, and
+forwards each value to `POST /api/observations`. Keeps Signal K as one
+optional data *source*, never a runtime dependency of this service.
 
 ## What changed from the plugin
 

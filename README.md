@@ -15,9 +15,10 @@ actually happens. By race morning you know whether to plan around ECMWF,
 the high-resolution Nordic model, or neither — and whether your trusted
 model habitually reads a few degrees left or right at your racecourse.
 
-**Status: M3 + M5 live** — verification, composite skill score, and webapp
-running on KarukeraPi since July 2026. See [PLAN.md](PLAN.md) for architecture
-and roadmap.
+**Status: M3 + M5 + M6 live** — verification, composite skill score, forecast
+track charts, and webapp running on KarukeraPi since July 2026, plus a
+standalone deployment (this branch) since August 2026. See [PLAN.md](PLAN.md)
+for architecture and roadmap.
 
 Fully independent of (but a good neighbor to)
 [signalk-windshift](https://github.com/theseal666/signalk-windshift) and
@@ -67,7 +68,14 @@ is now") — the honest baseline that separates real forecasting from noise.
    - **Which should I choose?** — a recommendation card per station, with the
      bias correction to apply.
    - **What's been the best match?** — models ranked, each with a plain-language
-     line ("≈24° off · reads +8° · catches 9/17 shifts · beats 'no change' from 6h").
+     line ("≈24° off · reads +8° · catches 9/17 shifts · runs ~40min late ·
+     beats 'no change' from 6h"). Catching a shift scores fully regardless of
+     exactly how early/late within the ±3h matching window it landed — the
+     timing lean is reported separately, not folded into the score.
+   - **Forecast tracks** — two scrollable charts (direction, speed) per
+     station: solid line = observed (stops at "now"), dotted colored line per
+     model continuing into the forecast horizon. Clock-aligned midnight/noon
+     markers, hover for exact values.
    - **Reason to switch mid-race?** — best model by horizon (now / morning /
      day-before); if it flips, that's your signal.
    - **Advanced** (collapsible) — the full per lead-time metric chart.
@@ -329,5 +337,7 @@ Högarna and near-zero at Vinga, that is a local Kattegat coastal jet effect
 ## What's next
 
 - **M4** — SMHI and met.no Locationforecast adapters, SignalK path publishing, npm release
-- **M6** — per-timeslot spaghetti chart: observed TWD with each model's forecast curve overlaid
-- **M7** — tab layout: Score / Detail / Spaghetti with URL-hash state
+- **M7** — tab layout: Score / Detail / Tracks with URL-hash state
+- **M11** — air pressure ingestion + fast-drop trend alert (barometer as an
+  early tell, independent of model verification); see the design note in
+  [PLAN.md](PLAN.md)
