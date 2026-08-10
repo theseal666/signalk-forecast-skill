@@ -18,8 +18,19 @@ function slugify(name) {
 }
 
 // Returns { bySlug, byId } where:
-//   bySlug: slug -> { latitude, longitude, name, slug }  (first match wins for duplicate slugs)
+//   bySlug: slug -> { latitude, longitude, name, slug }
 //   byId:   stationNumber -> same entry  (keyed by the integer station ID from the ViVa API)
+//
+// Two stations can slugify to the same string — slugify() strips
+// parenthetical suffixes, so e.g. "Stenungsund (Petroport)" and
+// "Stenungsund (Borealis)" both collapse to "stenungsund". Since every
+// location is keyed by slug throughout this app, an un-disambiguated
+// collision would silently make the second station unreachable (it'd never
+// get added, never show up in /api/stations, nothing — no error, just
+// missing). First-seen keeps the plain slug (matches signalk-viva's
+// convention, and doesn't change labels already in use by archived data);
+// any later station sharing that slug gets its ID appended so it stays
+// distinct and reachable.
 async function fetchStationIndex() {
   const res = await fetch(STATION_LIST_URL, {
     signal: AbortSignal.timeout(20000),
@@ -30,11 +41,12 @@ async function fetchStationIndex() {
   const byId = new Map();
   for (const s of json.GetStationsResult.Stations) {
     if (typeof s.Lat !== "number" || typeof s.Lon !== "number") continue;
-    const slug = slugify(s.Name);
+    const baseSlug = slugify(s.Name);
     // ViVa API field name for station number: try ID then StationID
     const id = s.ID ?? s.StationID;
+    const slug = bySlug.has(baseSlug) ? `${baseSlug}-${id}` : baseSlug;
     const entry = { latitude: s.Lat, longitude: s.Lon, name: s.Name, slug, id: id != null ? Number(id) : null };
-    if (!bySlug.has(slug)) bySlug.set(slug, entry);
+    bySlug.set(slug, entry);
     if (id != null) byId.set(Number(id), entry);
   }
   return { bySlug, byId };
